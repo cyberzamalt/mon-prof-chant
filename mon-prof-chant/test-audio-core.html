@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎵 Test Audio Core - Diagnostic Complet</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 800px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        h1 {
+            color: #667eea;
+            margin-bottom: 30px;
+            text-align: center;
+            font-size: 2em;
+        }
+
+        .section {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .section h2 {
+            color: #333;
+            font-size: 1.2em;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .protocol-status {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+
+        .protocol-https {
+            background: #d4edda;
+            color: #155724;
+            border: 2px solid #c3e6cb;
+        }
+
+        .protocol-http {
+            background: #f8d7da;
+            color: #721c24;
+            border: 2px solid #f5c6cb;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 1em;
+            cursor: pointer;
+            width: 100%;
+            margin-bottom: 10px;
+            transition: transform 0.2s, box-shadow 0.2s;
+            font-weight: bold;
+        }
+
+        .btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        #log-container {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+
+        .log-entry {
+            padding: 5px;
+            margin: 2px 0;
+            border-radius: 3px;
+        }
+
+        .log-success {
+            color: #4caf50;
+        }
+
+        .log-error {
+            color: #f44336;
+        }
+
+        .log-info {
+            color: #2196f3;
+        }
+
+        .log-warning {
+            color: #ff9800;
+        }
+
+        #status {
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-weight: 500;
+        }
+
+        .status-ready {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .status-running {
+            background: #fff3e0;
+            color: #f57c00;
+        }
+
+        .status-success {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+
+        .status-error {
+            background: #ffebee;
+            color: #d32f2f;
+        }
+
+        #mic-info {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
+
+        .clear-btn {
+            background: #dc3545;
+            margin-top: 10px;
+        }
+
+        .clear-btn:hover:not(:disabled) {
+            background: #c82333;
+        }
+
+        .icon {
+            font-size: 1.5em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 Test Audio Core - Diagnostic Complet</h1>
+
+        <div class="section">
+            <h2>🔒 Protocole Détecté</h2>
+            <div id="protocol-status" class="protocol-status">
+                Vérification en cours...
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🧪 Tests Disponibles</h2>
+            <button class="btn" onclick="initAudio()">1️⃣ Initialiser AudioEngine</button>
+            <button class="btn" id="btn-request-mic" onclick="requestMic()" disabled>2️⃣ Demander Microphone</button>
+            <button class="btn" id="btn-start-mic" onclick="startMic()" disabled>3️⃣ Démarrer Microphone</button>
+            <button class="btn" onclick="testAudio()">🔊 Tester Lecture Audio (Bip)</button>
+            <button class="btn" onclick="listDevices()">🎙️ Lister Devices Audio</button>
+            <button class="btn" id="btn-stop-mic" onclick="stopMic()" disabled>⏹️ Arrêter Microphone</button>
+            <button class="btn clear-btn" onclick="clearLogs()">🗑️ Effacer Logs</button>
+        </div>
+
+        <div class="section">
+            <h2>📊 Logs en Direct</h2>
+            <div id="status" class="status-ready">Prêt - Cliquez sur "1. Initialiser AudioEngine" pour commencer</div>
+            <div id="log-container"></div>
+            <div id="mic-info"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import AudioEngine from './mon-prof-chant/src/audio/core/AudioEngine.js';
+        import MicrophoneManager from './mon-prof-chant/src/audio/core/MicrophoneManager.js';
+        import Logger from './mon-prof-chant/src/utils/Logger.js';
+
+        Logger.setLogLevel('DEBUG');
+
+        function logToUI(message, type = 'info') {
+            const logContainer = document.getElementById('log-container');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            const timestamp = new Date().toLocaleTimeString('fr-FR');
+            entry.textContent = `[${timestamp}] ${message}`;
+            logContainer.appendChild(entry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function updateStatus(message, type = 'ready') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status-${type}`;
+        }
+
+        function clearLogs() {
+            document.getElementById('log-container').innerHTML = '';
+            logToUI('🗑️ Logs effacés', 'info');
+        }
+
+        const protocolStatus = document.getElementById('protocol-status');
+        const isHTTPS = window.location.protocol === 'https:';
+
+        if (isHTTPS) {
+            protocolStatus.className = 'protocol-status protocol-https';
+            protocolStatus.innerHTML = '✅ HTTPS Détecté - Microphone autorisé<br><small>Le navigateur autorisera l\'accès au microphone.</small>';
+            logToUI('✅ Protocole HTTPS - OK pour microphone', 'success');
+        } else {
+            protocolStatus.className = 'protocol-status protocol-http';
+            protocolStatus.innerHTML = '⚠️ HTTP Détecté - Microphone bloqué<br><small>Les navigateurs modernes bloquent le microphone sur HTTP. Utilisez HTTPS.</small>';
+            logToUI('⚠️ Protocole HTTP - Le micro sera refusé', 'warning');
+        }
+
+        window.initAudio = async function() {
+            try {
+                logToUI('🔧 Initialisation AudioEngine...', 'info');
+                updateStatus('Initialisation AudioEngine...', 'running');
+
+                window.audioEngine = AudioEngine.getInstance();
+                await window.audioEngine.init();
+
+                logToUI('✅ AudioEngine initialisé !', 'success');
+                logToUI(`Sample Rate: ${window.audioEngine.sampleRate} Hz`, 'info');
+                logToUI(`Context State: ${window.audioEngine.context.state}`, 'info');
+
+                window.eventBus = window.audioEngine.eventBus;
+                logToUI('✅ EventBus créé', 'success');
+
+                updateStatus('AudioEngine prêt !', 'success');
+
+                document.getElementById('btn-request-mic').disabled = false;
+
+            } catch (error) {
+                logToUI(`❌ Erreur: ${error.message}`, 'error');
+                updateStatus('Erreur lors de l\'initialisation', 'error');
+            }
+        };
+
+        window.requestMic = async function() {
+            try {
+                if (!window.audioEngine) {
+                    logToUI('❌ AudioEngine non initialisé. Cliquez d\'abord sur "Initialiser AudioEngine"', 'error');
+                    return;
+                }
+
+                if (!window.micManager) {
+                    window.micManager = new MicrophoneManager(window.audioEngine);
+                }
+
+                logToUI('🎤 Demande d\'accès au microphone...', 'info');
+                updateStatus('Demande d\'autorisation microphone...', 'running');
+
+                const granted = await window.micManager.requestPermission();
+
+                if (granted) {
+                    logToUI('✅ Permission microphone accordée !', 'success');
+                    updateStatus('Permission accordée - Vous pouvez démarrer le micro', 'success');
+                    document.getElementById('btn-start-mic').disabled = false;
+                } else {
+                    logToUI('❌ Permission microphone refusée', 'error');
+                    updateStatus('Permission refusée', 'error');
+                }
+
+            } catch (error) {
+                logToUI(`❌ Erreur microphone: ${error.message}`, 'error');
+                updateStatus('Erreur microphone', 'error');
+            }
+        };
+
+        window.startMic = async function() {
+            try {
+                if (!window.micManager) {
+                    logToUI('❌ Vous devez d\'abord demander la permission', 'error');
+                    return;
+                }
+
+                logToUI('🎤 Démarrage du microphone...', 'info');
+                updateStatus('Démarrage du microphone...', 'running');
+
+                await window.micManager.start();
+
+                logToUI('✅ Microphone démarré !', 'success');
+                updateStatus('Microphone actif !', 'success');
+
+                document.getElementById('btn-start-mic').disabled = true;
+                document.getElementById('btn-stop-mic').disabled = false;
+
+                const trackInfo = window.micManager.getTrackInfo();
+                if (trackInfo) {
+                    document.getElementById('mic-info').innerHTML = `
+                        <strong>📊 Informations Microphone:</strong><br>
+                        Device ID: ${trackInfo.deviceId || 'N/A'}<br>
+                        Label: ${trackInfo.label || 'N/A'}<br>
+                        Sample Rate: ${trackInfo.sampleRate || 'N/A'} Hz<br>
+                        Channels: ${trackInfo.channelCount || 'N/A'}<br>
+                        État: ${trackInfo.enabled ? '🟢 Actif' : '🔴 Inactif'}
+                    `;
+                }
+
+            } catch (error) {
+                logToUI(`❌ Erreur démarrage: ${error.message}`, 'error');
+                updateStatus('Erreur démarrage microphone', 'error');
+            }
+        };
+
+        window.testAudio = async function() {
+            try {
+                if (!window.audioEngine) {
+                    logToUI('❌ AudioEngine non initialisé', 'error');
+                    return;
+                }
+
+                logToUI('🔊 Test audio: lecture d\'un bip...', 'info');
+                updateStatus('Test audio en cours...', 'running');
+
+                const oscillator = window.audioEngine.context.createOscillator();
+                const gainNode = window.audioEngine.context.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(window.audioEngine.context.destination);
+
+                oscillator.frequency.value = 440;
+                gainNode.gain.value = 0.3;
+
+                oscillator.start();
+                setTimeout(() => {
+                    oscillator.stop();
+                    logToUI('✅ Bip joué (La 440 Hz)', 'success');
+                    updateStatus('Test audio terminé', 'success');
+                }, 500);
+
+            } catch (error) {
+                logToUI(`❌ Erreur: ${error.message}`, 'error');
+                updateStatus('Erreur test audio', 'error');
+            }
+        };
+
+        window.stopMic = async function() {
+            try {
+                if (!window.micManager) {
+                    logToUI('❌ Microphone non initialisé', 'error');
+                    return;
+                }
+
+                logToUI('⏹️ Arrêt du microphone...', 'info');
+                updateStatus('Arrêt du microphone...', 'running');
+
+                window.micManager.stop();
+
+                logToUI('✅ Microphone arrêté', 'success');
+                updateStatus('Microphone arrêté', 'info');
+
+                document.getElementById('btn-start-mic').disabled = false;
+                document.getElementById('btn-stop-mic').disabled = true;
+
+                document.getElementById('mic-info').innerHTML = '';
+
+            } catch (error) {
+                logToUI(`❌ Erreur: ${error.message}`, 'error');
+            }
+        };
+
+        window.listDevices = async function() {
+            try {
+                if (!window.micManager) {
+                    window.micManager = new MicrophoneManager(window.audioEngine || AudioEngine.getInstance());
+                }
+
+                logToUI('📋 Liste des devices audio...', 'info');
+                const devices = await window.micManager.listDevices();
+
+                logToUI(`Trouvé ${devices.length} device(s)`, 'success');
+                devices.forEach((device, i) => {
+                    logToUI(`  ${i+1}. ${device.label || 'Unknown'}`, 'info');
+                });
+
+            } catch (error) {
+                logToUI(`❌ Erreur: ${error.message}`, 'error');
+            }
+        };
+
+        logToUI('✨ Page chargée - Prêt pour les tests', 'success');
+        updateStatus('Prêt - Cliquez sur "1. Initialiser AudioEngine" pour commencer', 'info');
+
+    </script>
+</body>
+</html>

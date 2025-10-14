@@ -152,3 +152,4 @@ class Logger {
 
 // Export par défaut (IMPORTANT!)
 export default Logger;
+

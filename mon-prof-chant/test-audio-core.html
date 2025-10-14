@@ -74,7 +74,6 @@
   </div>
 
   <script type="module">
-    // --- Imports (mêmes chemins que ton repo/Pages) ---
     import AudioEngine from './src/audio/core/AudioEngine.js';
     import { Logger } from './src/logging/Logger.js';
     import MicrophoneManager from './src/audio/core/MicrophoneManager.js';
@@ -82,7 +81,6 @@
     import './src/audio/core/ErrorHandler.js';
     import { CONFIG } from './src/config.js';
 
-    // --- UI refs ---
     const logBox = document.getElementById('logBox');
     const btnInit = document.getElementById('btnInit');
     const btnMic = document.getElementById('btnMic');
@@ -102,174 +100,139 @@
     const navOS   = document.getElementById('navOS');
     const navMob  = document.getElementById('navMob');
 
-    // --- Logs vers l'écran ---
-    function addLog(line) {
-      const now = new Date().toTimeString().slice(0,8);
-      logBox.textContent += `\n[${now}] ${line}`;
-      logBox.scrollTop = logBox.scrollHeight;
-    }
-    Logger.setExternalSink?.((level, scope, msg, data) => {
-      const d = data ? ` | ${JSON.stringify(data)}` : '';
-      addLog(`[${level}] [${scope}] ${msg}${d}`);
-    });
+    function addLog(line){ const now=new Date().toTimeString().slice(0,8); logBox.textContent+=`\n[${now}] ${line}`; logBox.scrollTop=logBox.scrollHeight; }
+    Logger.setExternalSink?.((level, scope, msg, data)=>{ const d=data?` | ${JSON.stringify(data)}`:''; addLog(`[${level}] [${scope}] ${msg}${d}`); });
 
-    // --- État runtime ---
-    let audioEngine = null;
-    let micManager  = null;
-    let ctxInterval = null;
+    let audioEngine=null, micManager=null, ctxInterval=null;
 
-    // --- Infos protocole + navigateur ---
     (function showProtocolAndBrowser(){
-      const https = location.protocol === 'https:' || location.hostname === 'localhost';
+      const https = location.protocol==='https:' || location.hostname==='localhost';
       protoTxt.textContent = https ? 'HTTPS (sécurisé)' : 'HTTP (non sécurisé)';
       protoTxt.style.color = https ? 'var(--ok)' : 'var(--err)';
-
       const b = BrowserDetector.detect();
-      navName.textContent = b?.name ?? '—';
-      navVer.textContent  = b?.fullVersion ?? (b?.version ?? '—');
-      navOS.textContent   = b?.os ?? '—';
-      navMob.textContent  = b?.mobile ? 'Oui' : 'Non';
-
-      Logger.info('Test', '📱 Page chargée');
+      navName.textContent=b?.name??'—'; navVer.textContent=b?.fullVersion??(b?.version??'—'); navOS.textContent=b?.os??'—'; navMob.textContent=b?.mobile?'Oui':'Non';
+      Logger.info('Test','📱 Page chargée');
       Logger.info('Protocol', https ? 'HTTPS détecté - Microphone accessible' : 'HTTP détecté - Activer HTTPS pour le micro');
-      Logger.info('BrowserDetector', 'Détection du navigateur...');
-      Logger.info('BrowserDetector', `${b?.name ?? '?'} ${b?.fullVersion ?? b?.version ?? ''} sur ${b?.os ?? '?'}`, b);
-      const report = BrowserDetector.getCompatibilityReport?.() ?? {
-        browser: b,
-        features: {
-          AudioContext: !!window.AudioContext || !!window.webkitAudioContext,
-          getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
-          MediaRecorder: 'MediaRecorder' in window,
-          AnalyserNode: !!(window.AudioContext || window.webkitAudioContext),
-          localStorage: 'localStorage' in window,
-          WebAudio: !!(window.AudioContext || window.webkitAudioContext),
-        },
-        recommendations: [],
-        warnings: []
-      };
-      Logger.info('BrowserDetector', 'Rapport de compatibilité généré', report);
+      Logger.info('BrowserDetector','Détection du navigateur...');
+      Logger.info('BrowserDetector',`${b?.name??'?'} ${b?.fullVersion??b?.version??''} sur ${b?.os??'?'}`, b);
+      const report = BrowserDetector.getCompatibilityReport?.() ?? { browser:b, features:{ AudioContext:!!(window.AudioContext||window.webkitAudioContext), getUserMedia:!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia), MediaRecorder:'MediaRecorder'in window, AnalyserNode:!!(window.AudioContext||window.webkitAudioContext), localStorage:'localStorage'in window, WebAudio:!!(window.AudioContext||window.webkitAudioContext)}, recommendations:[], warnings:[] };
+      Logger.info('BrowserDetector','Rapport de compatibilité généré', report);
     })();
 
-    // --- Ticker panneau AudioContext ---
-    function startContextTicker(ctx) {
+    function startContextTicker(ctx){
       stopContextTicker();
-      ctxInterval = setInterval(() => {
-        try {
-          ctxState.textContent   = ctx?.state ?? '—';
-          ctxRate.textContent    = `${ctx?.sampleRate ?? 0} Hz`;
-          const base = typeof ctx?.baseLatency === 'number' ? ctx.baseLatency : 0;
-          ctxLatency.textContent = `${(base*1000).toFixed(2)} ms`;
-          ctxTime.textContent    = `${(ctx?.currentTime ?? 0).toFixed(2)} s`;
-        } catch {}
-      }, 250);
+      ctxInterval=setInterval(()=>{ try{
+        ctxState.textContent=ctx?.state??'—';
+        ctxRate.textContent=`${ctx?.sampleRate??0} Hz`;
+        const base=typeof ctx?.baseLatency==='number'?ctx.baseLatency:0;
+        ctxLatency.textContent=`${(base*1000).toFixed(2)} ms`;
+        ctxTime.textContent=`${(ctx?.currentTime??0).toFixed(2)} s`;
+      }catch{} },250);
     }
-    function stopContextTicker(){
-      if (ctxInterval) { clearInterval(ctxInterval); ctxInterval = null; }
-    }
+    function stopContextTicker(){ if(ctxInterval){ clearInterval(ctxInterval); ctxInterval=null; } }
 
-    // --- Bouton: Initialiser ---
-    btnInit.addEventListener('click', async () => {
+    // ---------- INITIALISER ----------
+    btnInit.addEventListener('click', async ()=>{
       addLog('[INFO] [Test] 🚀 Initialisation de l\'AudioEngine...');
-      try {
-        // 1) Créer l’instance (ou récup singleton si dispo)
-        audioEngine = (typeof AudioEngine.getInstance === 'function')
-          ? AudioEngine.getInstance({ sampleRate: CONFIG?.audio?.sampleRate ?? 48000, latencyHint: 'interactive' })
-          : new AudioEngine({ sampleRate: CONFIG?.audio?.sampleRate ?? 48000, latencyHint: 'interactive' });
+      try{
+        const opts={ sampleRate: CONFIG?.audio?.sampleRate ?? 48000, latencyHint:'interactive' };
 
-        // 2) IMPORTANT : appeler l'initialisation asynchrone de TON AudioEngine
-        if (typeof audioEngine.initialize === 'function') {
-          await audioEngine.initialize();
+        // (A) Certains projets exposent un constructeur + init d'instance
+        // (B) D’autres exposent une fabrique statique (create/initialize) qui retourne l’instance
+        // On couvre TOUT :
+
+        // 1) essayer fabrique statique qui RETOURNE une instance
+        if (typeof AudioEngine.create === 'function') {
+          Logger.debug?.('Test','AudioEngine.create(opts) détecté');
+          audioEngine = await AudioEngine.create(opts);
+        } else if (typeof AudioEngine.initialize === 'function') {
+          Logger.debug?.('Test','AudioEngine.initialize(opts) statique détecté');
+          audioEngine = await AudioEngine.initialize(opts);
         }
 
-        // 3) Récupérer le contexte créé par initialize()
-        const ctx = audioEngine.getContext?.();
+        // 2) sinon, on instancie
+        if (!audioEngine) {
+          audioEngine = (typeof AudioEngine.getInstance === 'function')
+            ? AudioEngine.getInstance(opts)
+            : new AudioEngine(opts);
+        }
+
+        // 3) appeler la méthode d’init D’INSTANCE si elle existe
+        const initFn =
+          (typeof audioEngine.initialize === 'function' && 'initialize') ||
+          (typeof audioEngine.init === 'function' && 'init') ||
+          (typeof audioEngine.setup === 'function' && 'setup') ||
+          (typeof audioEngine.start === 'function' && 'start') ||
+          null;
+        if (initFn) {
+          await audioEngine[initFn]();
+        }
+
+        // 4) récupérer le contexte (getter ou propriété)
+        const ctx = audioEngine.getContext?.() || audioEngine.context || window.__AUDIO_CTX__;
         if (!ctx) throw new Error('AudioContext introuvable');
 
-        // 4) En général, après geste user le resume passe direct
-        if (ctx.state !== 'running' && typeof ctx.resume === 'function') {
+        if (ctx.state!=='running' && typeof ctx.resume==='function') {
           await ctx.resume();
         }
 
         startContextTicker(ctx);
-
         sysStatus.innerHTML = '<span class="ok">Système initialisé avec succès</span><br>AudioEngine opérationnel. Vous pouvez maintenant tester le microphone.';
-        btnMic.disabled = false;
-        btnDestroy.disabled = false;
-      } catch (e) {
-        sysStatus.innerHTML = `<span class="err">Échec d\'initialisation</span><br>${e?.message ?? e}`;
-        addLog(`[ERROR] [Test] Init AudioEngine: ${e?.message ?? e}`);
+        btnMic.disabled=false; btnDestroy.disabled=false;
+
+      }catch(e){
+        sysStatus.innerHTML = `<span class="err">Échec d\'initialisation</span><br>${e?.message??e}`;
+        addLog(`[ERROR] [Test] Init AudioEngine: ${e?.message??e}`);
       }
     });
 
-    // --- Bouton: Tester Microphone ---
-    btnMic.addEventListener('click', async () => {
-      Logger.info('Test', '🎤 Test du microphone...');
-      try {
-        if (!audioEngine) {
-          addLog('[WARN] [Test] AudioEngine non initialisé. Cliquez sur “Initialiser” d’abord.');
-          return;
-        }
-        if (!micManager) {
+    // ---------- TESTER MICRO ----------
+    btnMic.addEventListener('click', async ()=>{
+      Logger.info('Test','🎤 Test du microphone...');
+      try{
+        if(!audioEngine){ addLog('[WARN] [Test] AudioEngine non initialisé. Cliquez sur “Initialiser” d’abord.'); return; }
+        if(!micManager){
           micManager = new MicrophoneManager(audioEngine /*, eventBus optionnel */);
-          Logger.info('MicrophoneManager', 'MicrophoneManager créé');
+          Logger.info('MicrophoneManager','MicrophoneManager créé');
         }
 
         const ok = await micManager.requestPermission(); // alias → requestAccess()
-        if (!ok) {
-          addLog('[ERROR] [Test] Accès micro refusé ou erreur (voir logs au-dessus).');
-          return;
-        }
+        if(!ok){ addLog('[ERROR] [Test] Accès micro refusé ou erreur (voir logs au-dessus).'); return; }
 
         const stream = micManager.getStream();
-        if (!stream) {
-          addLog('[ERROR] [Test] Flux micro introuvable malgré autorisation.');
-          return;
-        }
+        if(!stream){ addLog('[ERROR] [Test] Flux micro introuvable malgré autorisation.'); return; }
 
         const tracks = stream.getAudioTracks?.() ?? [];
-        Logger.info('Test', 'Piste micro', { count: tracks.length, label: tracks[0]?.label || 'N/A' });
+        Logger.info('Test','Piste micro',{ count:tracks.length, label:tracks[0]?.label||'N/A' });
 
         const source = micManager.createSource();
-        if (source) {
-          Logger.info('Test', 'MediaStreamSource créé');
-          addLog('[INFO] [Test] Micro OK → flux ouvert & source WebAudio créée.');
-        } else {
-          addLog('[WARN] [Test] Flux ouvert, mais source WebAudio non créée (voir logs).');
-        }
+        if(source){ Logger.info('Test','MediaStreamSource créé'); addLog('[INFO] [Test] Micro OK → flux ouvert & source WebAudio créée.'); }
+        else{ addLog('[WARN] [Test] Flux ouvert, mais source WebAudio non créée (voir logs).'); }
 
-      } catch (e) {
-        Logger.error('Test', 'Erreur pendant le test micro', { message: e?.message, name: e?.name });
-        addLog(`[ERROR] [Test] ${e?.name ?? 'Error'}: ${e?.message ?? e}`);
+      }catch(e){
+        Logger.error('Test','Erreur pendant le test micro',{ message:e?.message, name:e?.name });
+        addLog(`[ERROR] [Test] ${e?.name??'Error'}: ${e?.message??e}`);
       }
     });
 
-    // --- Bouton: Détruire ---
-    btnDestroy.addEventListener('click', async () => {
-      try {
+    // ---------- DÉTRUIRE ----------
+    btnDestroy.addEventListener('click', async ()=>{
+      try{
         stopContextTicker();
-        if (micManager) { micManager.destroy?.(); micManager = null; }
-        if (audioEngine) {
-          const ctx = audioEngine.getContext?.();
-          if (ctx?.state === 'running' && typeof ctx.close === 'function') {
-            await ctx.close();
-          }
-          audioEngine = null;
+        if(micManager){ micManager.destroy?.(); micManager=null; }
+        if(audioEngine){
+          const ctx = audioEngine.getContext?.() || audioEngine.context;
+          if (ctx?.state==='running' && typeof ctx.close==='function'){ await ctx.close(); }
+          audioEngine=null;
         }
-        sysStatus.innerHTML = 'Réinitialisé. Cliquez sur “Initialiser” pour recommencer.';
-        btnMic.disabled = true;
-        btnDestroy.disabled = true;
-
+        sysStatus.innerHTML='Réinitialisé. Cliquez sur “Initialiser” pour recommencer.';
+        btnMic.disabled=true; btnDestroy.disabled=true;
         ctxState.textContent = ctxRate.textContent = ctxLatency.textContent = ctxTime.textContent = '—';
         addLog('[INFO] [Test] Système détruit.');
-      } catch (e) {
-        addLog(`[ERROR] [Test] Destroy: ${e?.message ?? e}`);
-      }
+      }catch(e){ addLog(`[ERROR] [Test] Destroy: ${e?.message??e}`); }
     });
 
-    // --- Bouton: Effacer logs ---
-    btnClear.addEventListener('click', () => {
-      logBox.textContent = 'Système de logs prêt…';
-    });
+    btnClear.addEventListener('click',()=>{ logBox.textContent='Système de logs prêt…'; });
   </script>
 </body>
 </html>

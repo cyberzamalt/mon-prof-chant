@@ -74,16 +74,15 @@
   </div>
 
   <script type="module">
-    // --- Imports des modules du projet (chemins identiques à tes logs) ---
+    // --- Imports (mêmes chemins que ton repo/Pages) ---
     import AudioEngine from './src/audio/core/AudioEngine.js';
     import { Logger } from './src/logging/Logger.js';
     import MicrophoneManager from './src/audio/core/MicrophoneManager.js';
     import BrowserDetector from './src/utils/BrowserDetector.js';
-    import AudioContextManager from './src/audio/core/AudioContextManager.js'; // utilisé indirectement par AudioEngine
-    import './src/audio/core/ErrorHandler.js'; // enregistre le handler global
+    import './src/audio/core/ErrorHandler.js';
     import { CONFIG } from './src/config.js';
 
-    // --- Elements UI ---
+    // --- UI refs ---
     const logBox = document.getElementById('logBox');
     const btnInit = document.getElementById('btnInit');
     const btnMic = document.getElementById('btnMic');
@@ -103,7 +102,7 @@
     const navOS   = document.getElementById('navOS');
     const navMob  = document.getElementById('navMob');
 
-    // --- Helpers log vers le <pre> ---
+    // --- Logs vers l'écran ---
     function addLog(line) {
       const now = new Date().toTimeString().slice(0,8);
       logBox.textContent += `\n[${now}] ${line}`;
@@ -119,7 +118,7 @@
     let micManager  = null;
     let ctxInterval = null;
 
-    // --- Affichages init ---
+    // --- Infos protocole + navigateur ---
     (function showProtocolAndBrowser(){
       const https = location.protocol === 'https:' || location.hostname === 'localhost';
       protoTxt.textContent = https ? 'HTTPS (sécurisé)' : 'HTTP (non sécurisé)';
@@ -151,14 +150,15 @@
       Logger.info('BrowserDetector', 'Rapport de compatibilité généré', report);
     })();
 
-    // --- MAJ panneau AudioContext ---
+    // --- Ticker panneau AudioContext ---
     function startContextTicker(ctx) {
       stopContextTicker();
       ctxInterval = setInterval(() => {
         try {
           ctxState.textContent   = ctx?.state ?? '—';
           ctxRate.textContent    = `${ctx?.sampleRate ?? 0} Hz`;
-          ctxLatency.textContent = (ctx?.baseLatency ?? 0).toFixed ? `${(ctx.baseLatency*1000).toFixed(2)} ms` : '0,00 ms';
+          const base = typeof ctx?.baseLatency === 'number' ? ctx.baseLatency : 0;
+          ctxLatency.textContent = `${(base*1000).toFixed(2)} ms`;
           ctxTime.textContent    = `${(ctx?.currentTime ?? 0).toFixed(2)} s`;
         } catch {}
       }, 250);
@@ -171,13 +171,23 @@
     btnInit.addEventListener('click', async () => {
       addLog('[INFO] [Test] 🚀 Initialisation de l\'AudioEngine...');
       try {
-        audioEngine = new AudioEngine({ sampleRate: CONFIG?.audio?.sampleRate ?? 48000, latencyHint: 'interactive' });
+        // 1) Créer l’instance (ou récup singleton si dispo)
+        audioEngine = (typeof AudioEngine.getInstance === 'function')
+          ? AudioEngine.getInstance({ sampleRate: CONFIG?.audio?.sampleRate ?? 48000, latencyHint: 'interactive' })
+          : new AudioEngine({ sampleRate: CONFIG?.audio?.sampleRate ?? 48000, latencyHint: 'interactive' });
+
+        // 2) IMPORTANT : appeler l'initialisation asynchrone de TON AudioEngine
+        if (typeof audioEngine.initialize === 'function') {
+          await audioEngine.initialize();
+        }
+
+        // 3) Récupérer le contexte créé par initialize()
         const ctx = audioEngine.getContext?.();
         if (!ctx) throw new Error('AudioContext introuvable');
 
-        // tenter resume (doit marcher après geste user)
-        if (ctx.state !== 'running') {
-          await ctx.resume?.();
+        // 4) En général, après geste user le resume passe direct
+        if (ctx.state !== 'running' && typeof ctx.resume === 'function') {
+          await ctx.resume();
         }
 
         startContextTicker(ctx);
@@ -199,31 +209,26 @@
           addLog('[WARN] [Test] AudioEngine non initialisé. Cliquez sur “Initialiser” d’abord.');
           return;
         }
-        // 1) Créer le manager si absent
         if (!micManager) {
           micManager = new MicrophoneManager(audioEngine /*, eventBus optionnel */);
           Logger.info('MicrophoneManager', 'MicrophoneManager créé');
         }
 
-        // 2) Demander l’accès (renvoie true/false, PAS un MediaStream)
         const ok = await micManager.requestPermission(); // alias → requestAccess()
         if (!ok) {
           addLog('[ERROR] [Test] Accès micro refusé ou erreur (voir logs au-dessus).');
           return;
         }
 
-        // 3) Récupérer le VRAI MediaStream depuis le manager
         const stream = micManager.getStream();
         if (!stream) {
           addLog('[ERROR] [Test] Flux micro introuvable malgré autorisation.');
           return;
         }
 
-        // (Infos piste pour confirmer)
         const tracks = stream.getAudioTracks?.() ?? [];
         Logger.info('Test', 'Piste micro', { count: tracks.length, label: tracks[0]?.label || 'N/A' });
 
-        // 4) (Optionnel) créer le MediaStreamSource pour lier au graphe WebAudio
         const source = micManager.createSource();
         if (source) {
           Logger.info('Test', 'MediaStreamSource créé');
@@ -244,9 +249,10 @@
         stopContextTicker();
         if (micManager) { micManager.destroy?.(); micManager = null; }
         if (audioEngine) {
-          // si AudioEngine expose une méthode de close/destroy, sinon juste libérer la ref
           const ctx = audioEngine.getContext?.();
-          if (ctx?.state === 'running' && ctx?.close) { await ctx.close(); }
+          if (ctx?.state === 'running' && typeof ctx.close === 'function') {
+            await ctx.close();
+          }
           audioEngine = null;
         }
         sysStatus.innerHTML = 'Réinitialisé. Cliquez sur “Initialiser” pour recommencer.';

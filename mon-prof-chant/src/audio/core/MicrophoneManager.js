@@ -17,7 +17,6 @@ import { CONFIG } from '../../config.js';
 import { errorHandler } from './ErrorHandler.js';
 
 export class MicrophoneManager {
-  
   #audioEngine = null;
   #eventBus = null;
   #stream = null;
@@ -31,55 +30,63 @@ export class MicrophoneManager {
    * @param {AudioBus} eventBus - Instance d'AudioBus (optionnel)
    */
   constructor(audioEngine, eventBus = null) {
-    if (!audioEngine) {
-      throw new Error('[MicrophoneManager] AudioEngine required');
-    }
-
+    if (!audioEngine) throw new Error('[MicrophoneManager] AudioEngine required');
     this.#audioEngine = audioEngine;
     this.#eventBus = eventBus;
-
     Logger.info('MicrophoneManager', 'Initialized');
   }
 
+  // ───────────────────────────────────────────────────────────────────────────────
+  // Accès micro
+  // ───────────────────────────────────────────────────────────────────────────────
+
   /**
-   * Demande l'accès au microphone
-   * DOIT être appelé depuis un geste utilisateur
-   * @param {object} constraints - Contraintes getUserMedia (optionnel)
+   * ALIAS de compatibilité : certaines pages appellent requestPermission()
+   * → on redirige vers requestAccess()
+   * @param {object} constraints
+   * @returns {Promise<boolean>}
+   */
+  async requestPermission(constraints = {}) {
+    Logger.debug('MicrophoneManager', 'requestPermission() alias → requestAccess()');
+    return this.requestAccess(constraints);
+  }
+
+  /**
+   * Demande l'accès au microphone (doit être appelé suite à un geste utilisateur)
+   * @param {object} constraints - Contraintes audio additionnelles (ex: { deviceId: { exact: "…" } })
    * @returns {Promise<boolean>} true si accès accordé
    */
   async requestAccess(constraints = {}) {
     try {
       Logger.info('MicrophoneManager', 'Requesting microphone access...');
 
-      // Vérifier si déjà accordé
+      // Déjà accordé ?
       if (this.#state === 'granted' && this.#stream) {
         Logger.debug('MicrophoneManager', 'Already granted');
         return true;
       }
 
-      // Vérifier support getUserMedia
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      // Support ?
+      if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error('getUserMedia not supported in this browser');
       }
 
       this.#state = 'requesting';
-
-      // Émettre événement
       this.#eventBus?.emit('microphone:requesting');
 
-      // Contraintes par défaut optimisées pour voix
+      // Contraintes par défaut optimisées voix
       const defaultConstraints = {
         audio: {
-          echoCancellation: true,   // Annulation écho
-          noiseSuppression: true,   // Réduction bruit
-          autoGainControl: true,    // Gain automatique
-          sampleRate: CONFIG.audio.sampleRate,
-          channelCount: 1,          // Mono (suffisant pour voix)
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: CONFIG?.audio?.sampleRate ?? 48000, // indicatif, ignoré par certains navigateurs
+          channelCount: 1,
         },
         video: false,
       };
 
-      // Merger avec contraintes custom
+      // Merge (les clés passées sont fusionnées dans audio)
       const finalConstraints = {
         ...defaultConstraints,
         audio: {
@@ -90,53 +97,48 @@ export class MicrophoneManager {
 
       Logger.debug('MicrophoneManager', 'Constraints', finalConstraints);
 
-      // Demander accès
+      // Demande d’accès
       this.#stream = await navigator.mediaDevices.getUserMedia(finalConstraints);
 
-      // Récupérer device ID
+      // Infos piste
       const audioTrack = this.#stream.getAudioTracks()[0];
       if (audioTrack) {
-        this.#deviceId = audioTrack.getSettings().deviceId;
-        
+        const settings = audioTrack.getSettings?.() ?? {};
+        this.#deviceId = settings.deviceId ?? null;
         Logger.info('MicrophoneManager', 'Microphone track', {
           label: audioTrack.label,
           deviceId: this.#deviceId,
-          settings: audioTrack.getSettings(),
+          settings,
         });
+      } else {
+        Logger.warn('MicrophoneManager', 'No audio track returned by getUserMedia');
       }
 
       this.#state = 'granted';
-
       Logger.info('MicrophoneManager', 'Microphone access granted');
 
-      // Émettre événement
       this.#eventBus?.emit('microphone:granted', {
         deviceId: this.#deviceId,
         stream: this.#stream,
       });
 
       return true;
-
     } catch (error) {
       this.#state = 'denied';
 
       Logger.error('MicrophoneManager', 'Microphone access failed', {
-        error: error.message,
-        name: error.name,
+        error: error?.message,
+        name: error?.name,
       });
 
-      // Analyser le type d'erreur
       const errorType = this.#analyzeError(error);
 
-      // Émettre événement
       this.#eventBus?.emit('microphone:denied', {
         error: errorType,
         originalError: error,
       });
 
-      // Afficher message utilisateur
       errorHandler.handle(error, 'MicrophoneManager.requestAccess', true);
-
       return false;
     }
   }
@@ -145,25 +147,13 @@ export class MicrophoneManager {
    * Analyse le type d'erreur microphone
    */
   #analyzeError(error) {
-    const name = error.name?.toLowerCase() || '';
-    const message = error.message?.toLowerCase() || '';
+    const name = error?.name?.toLowerCase?.() || '';
+    const message = error?.message?.toLowerCase?.() || '';
 
-    if (name.includes('notallowed') || name.includes('permission')) {
-      return 'permission_denied';
-    }
-
-    if (name.includes('notfound') || message.includes('requested device not found')) {
-      return 'device_not_found';
-    }
-
-    if (name.includes('notreadable') || name.includes('aborterror')) {
-      return 'device_in_use';
-    }
-
-    if (name.includes('overconstrained')) {
-      return 'constraints_not_satisfied';
-    }
-
+    if (name.includes('notallowed') || name.includes('permission')) return 'permission_denied';
+    if (name.includes('notfound') || message.includes('requested device not found')) return 'device_not_found';
+    if (name.includes('notreadable') || name.includes('aborterror')) return 'device_in_use';
+    if (name.includes('overconstrained')) return 'constraints_not_satisfied';
     return 'unknown';
   }
 
@@ -179,24 +169,19 @@ export class MicrophoneManager {
       }
 
       const audioContext = this.#audioEngine.getContext();
-      
       if (!audioContext) {
         Logger.error('MicrophoneManager', 'No AudioContext available');
         return null;
       }
 
-      // Créer le source node
       this.#sourceNode = audioContext.createMediaStreamSource(this.#stream);
-
       Logger.info('MicrophoneManager', 'MediaStreamSource created');
 
-      // Émettre événement
       this.#eventBus?.emit('microphone:source_created', {
         sourceNode: this.#sourceNode,
       });
 
       return this.#sourceNode;
-
     } catch (error) {
       Logger.error('MicrophoneManager', 'Failed to create source', error);
       errorHandler.handle(error, 'MicrophoneManager.createSource', false);
@@ -211,19 +196,19 @@ export class MicrophoneManager {
     try {
       Logger.info('MicrophoneManager', 'Stopping microphone...');
 
-      // Arrêter toutes les tracks
       if (this.#stream) {
         this.#stream.getTracks().forEach(track => {
-          track.stop();
-          Logger.debug('MicrophoneManager', 'Track stopped', { 
-            label: track.label,
-          });
+          try {
+            track.stop();
+            Logger.debug('MicrophoneManager', 'Track stopped', { label: track.label });
+          } catch (e) {
+            Logger.debug('MicrophoneManager', 'Track stop error (ignored)', { error: e?.message });
+          }
         });
       }
 
-      // Déconnecter le source node
       if (this.#sourceNode) {
-        this.#sourceNode.disconnect();
+        try { this.#sourceNode.disconnect(); } catch (_) {}
         this.#sourceNode = null;
       }
 
@@ -231,10 +216,7 @@ export class MicrophoneManager {
       this.#state = 'uninitialized';
 
       Logger.info('MicrophoneManager', 'Microphone stopped');
-
-      // Émettre événement
       this.#eventBus?.emit('microphone:stopped');
-
     } catch (error) {
       Logger.error('MicrophoneManager', 'Stop failed', error);
     }
@@ -242,19 +224,19 @@ export class MicrophoneManager {
 
   /**
    * Liste les devices audio disponibles
-   * @returns {Promise<Array>} Liste des devices
+   * @returns {Promise<Array>} Liste des devices audioinput
    */
   async listDevices() {
     try {
       Logger.debug('MicrophoneManager', 'Listing audio devices...');
 
-      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+      if (!navigator.mediaDevices?.enumerateDevices) {
         Logger.warn('MicrophoneManager', 'enumerateDevices not supported');
         return [];
       }
 
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const audioInputs = devices.filter(device => device.kind === 'audioinput');
+      const audioInputs = devices.filter(d => d.kind === 'audioinput');
 
       Logger.info('MicrophoneManager', 'Audio devices found', {
         count: audioInputs.length,
@@ -265,7 +247,6 @@ export class MicrophoneManager {
       });
 
       return audioInputs;
-
     } catch (error) {
       Logger.error('MicrophoneManager', 'List devices failed', error);
       return [];
@@ -281,102 +262,60 @@ export class MicrophoneManager {
     try {
       Logger.info('MicrophoneManager', 'Switching device', { deviceId });
 
-      // Arrêter le stream actuel
-      this.stop();
+      this.stop(); // arrête l’existant proprement
 
-      // Demander nouveau stream avec le device spécifique
       const success = await this.requestAccess({ deviceId: { exact: deviceId } });
-
-      if (success) {
-        Logger.info('MicrophoneManager', 'Device switched successfully');
-      }
-
+      if (success) Logger.info('MicrophoneManager', 'Device switched successfully');
       return success;
-
     } catch (error) {
       Logger.error('MicrophoneManager', 'Switch device failed', error);
       return false;
     }
   }
 
-  // ========================================
+  // ───────────────────────────────────────────────────────────────────────────────
   // GETTERS
-  // ========================================
+  // ───────────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Récupère l'état actuel
-   */
-  getState() {
-    return this.#state;
-  }
+  getState() { return this.#state; }
 
-  /**
-   * Vérifie si l'accès est accordé
-   */
-  isGranted() {
-    return this.#state === 'granted' && this.#stream !== null;
-  }
+  isGranted() { return this.#state === 'granted' && this.#stream !== null; }
 
-  /**
-   * Récupère le stream
-   */
-  getStream() {
-    return this.#stream;
-  }
+  getStream() { return this.#stream; }
 
-  /**
-   * Récupère le source node
-   */
-  getSourceNode() {
-    return this.#sourceNode;
-  }
+  getSourceNode() { return this.#sourceNode; }
 
-  /**
-   * Récupère le device ID actuel
-   */
-  getDeviceId() {
-    return this.#deviceId;
-  }
+  getDeviceId() { return this.#deviceId; }
 
-  /**
-   * Récupère les infos du track audio
-   */
   getTrackInfo() {
     if (!this.#stream) return null;
-
     const track = this.#stream.getAudioTracks()[0];
     if (!track) return null;
 
     return {
       label: track.label,
-      deviceId: track.getSettings().deviceId,
-      settings: track.getSettings(),
+      deviceId: track.getSettings?.().deviceId,
+      settings: track.getSettings?.(),
       capabilities: track.getCapabilities ? track.getCapabilities() : null,
       state: track.readyState,
       enabled: track.enabled,
       muted: track.muted,
     };
-  }
+    }
 
   /**
    * Vérifie le statut des permissions
-   * @returns {Promise<string>} 'granted' | 'denied' | 'prompt'
+   * @returns {Promise<string>} 'granted' | 'denied' | 'prompt' | 'unknown'
    */
   async checkPermissionStatus() {
     try {
-      if (!navigator.permissions || !navigator.permissions.query) {
+      if (!navigator.permissions?.query) {
         Logger.debug('MicrophoneManager', 'Permissions API not supported');
         return 'unknown';
       }
-
       const result = await navigator.permissions.query({ name: 'microphone' });
-      
-      Logger.debug('MicrophoneManager', 'Permission status', { 
-        state: result.state,
-      });
-
+      Logger.debug('MicrophoneManager', 'Permission status', { state: result.state });
       return result.state; // 'granted' | 'denied' | 'prompt'
-
     } catch (error) {
       Logger.debug('MicrophoneManager', 'Check permission failed', error);
       return 'unknown';
@@ -392,22 +331,15 @@ export class MicrophoneManager {
         Logger.warn('MicrophoneManager', 'No stream to enable/disable');
         return false;
       }
-
       const track = this.#stream.getAudioTracks()[0];
       if (!track) {
         Logger.warn('MicrophoneManager', 'No audio track found');
         return false;
       }
-
       track.enabled = enabled;
-
       Logger.info('MicrophoneManager', enabled ? 'Microphone enabled' : 'Microphone disabled');
-
-      // Émettre événement
       this.#eventBus?.emit('microphone:' + (enabled ? 'enabled' : 'disabled'));
-
       return true;
-
     } catch (error) {
       Logger.error('MicrophoneManager', 'Set enabled failed', error);
       return false;
@@ -416,14 +348,9 @@ export class MicrophoneManager {
 
   /**
    * Récupère le niveau audio actuel (volume)
-   * @returns {number} Niveau 0-1
+   * @returns {number} Niveau 0-1 (stub, nécessite AnalyserNode)
    */
-  getAudioLevel() {
-    // Cette méthode nécessiterait un AnalyserNode
-    // Pour l'instant, retourner 0
-    // TODO: Implémenter avec AnalyserNode dans un prochain module
-    return 0;
-  }
+  getAudioLevel() { return 0; }
 
   /**
    * Affiche un rapport dans la console
@@ -434,11 +361,8 @@ export class MicrophoneManager {
       Logger.info('MicrophoneManager', 'Has Stream', !!this.#stream);
       Logger.info('MicrophoneManager', 'Has Source Node', !!this.#sourceNode);
       Logger.info('MicrophoneManager', 'Device ID', this.#deviceId || 'N/A');
-      
       const trackInfo = this.getTrackInfo();
-      if (trackInfo) {
-        Logger.info('MicrophoneManager', 'Track Info', trackInfo);
-      }
+      if (trackInfo) Logger.info('MicrophoneManager', 'Track Info', trackInfo);
     });
   }
 
@@ -447,14 +371,12 @@ export class MicrophoneManager {
    */
   destroy() {
     Logger.info('MicrophoneManager', 'Destroying...');
-    
     this.stop();
     this.#audioEngine = null;
     this.#eventBus = null;
-    
     Logger.info('MicrophoneManager', 'Destroyed');
   }
 }
 
-// Export par défaut
+// Export par défaut + export nommé (flexible pour les imports)
 export default MicrophoneManager;

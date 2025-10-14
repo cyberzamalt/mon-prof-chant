@@ -24,6 +24,8 @@
     .b1[disabled],.b2[disabled],.b3[disabled]{opacity:.45;cursor:not-allowed}
     pre{background:#0b1020;color:#dbeafe;border-radius:10px;padding:12px;max-height:320px;overflow:auto}
     .ok{color:var(--ok)} .err{color:var(--err)} .muted{color:var(--muted)}
+    /* Scope */
+    #scope{width:100%;height:160px;background:#0b1020;border-radius:10px;display:block}
   </style>
 </head>
 <body>
@@ -74,8 +76,8 @@
     </div>
 
     <div class="card">
-      <div style="font-weight:800;margin-bottom:10px">VU-mètre</div>
-      <canvas id="vu" width="800" height="40" style="width:100%;height:40px;background:#111;border-radius:8px"></canvas>
+      <div style="font-weight:800;margin-bottom:10px">Oscilloscope (forme d’onde)</div>
+      <canvas id="scope" width="800" height="160"></canvas>
     </div>
   </div>
 
@@ -87,32 +89,46 @@
     import './src/audio/core/ErrorHandler.js';
     import { CONFIG } from './src/config.js';
 
+    // UI
     const logBox = document.getElementById('logBox');
     const btnInit = document.getElementById('btnInit');
     const btnMic = document.getElementById('btnMic');
     const btnRec = document.getElementById('btnRec');
     const btnDestroy = document.getElementById('btnDestroy');
     const btnClear = document.getElementById('btnClear');
-
     const protoTxt = document.getElementById('protoTxt');
     const sysStatus = document.getElementById('sysStatus');
-
     const ctxState = document.getElementById('ctxState');
-    const ctxRate = document.getElementById('ctxRate');
+    const ctxRate  = document.getElementById('ctxRate');
     const ctxLatency = document.getElementById('ctxLatency');
-    const ctxTime = document.getElementById('ctxTime');
-
+    const ctxTime  = document.getElementById('ctxTime');
     const navName = document.getElementById('navName');
     const navVer  = document.getElementById('navVer');
     const navOS   = document.getElementById('navOS');
     const navMob  = document.getElementById('navMob');
 
+    // Scope canvas (oscilloscope)
+    const scope = document.getElementById('scope');
+    const gl = scope.getContext('2d');
+    function fitScopeDPR(){
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = scope.clientWidth;
+      const cssH = scope.clientHeight;
+      scope.width = Math.round(cssW * dpr);
+      scope.height = Math.round(cssH * dpr);
+      gl.setTransform(dpr,0,0,dpr,0,0);
+    }
+    fitScopeDPR(); addEventListener('resize', fitScopeDPR);
+
+    // Logs vers l'écran
     function addLog(line){ const now=new Date().toTimeString().slice(0,8); logBox.textContent+=`\n[${now}] ${line}`; logBox.scrollTop=logBox.scrollHeight; }
     Logger.setExternalSink?.((level, scope, msg, data)=>{ const d=data?` | ${JSON.stringify(data)}`:''; addLog(`[${level}] [${scope}] ${msg}${d}`); });
 
-    let audioEngine=null, micManager=null, ctxInterval=null, analyser=null, mediaRecorder=null;
+    // État
+    let audioEngine=null, micManager=null, ctxInterval=null, analyser=null, mediaRecorder=null, drawRAF=null;
 
-    (function showProtocolAndBrowser(){
+    // Infos protocole + navigateur
+    (function boot(){
       const https = location.protocol==='https:' || location.hostname==='localhost';
       protoTxt.textContent = https ? 'HTTPS (sécurisé)' : 'HTTP (non sécurisé)';
       protoTxt.style.color = https ? 'var(--ok)' : 'var(--err)';
@@ -126,6 +142,7 @@
       Logger.info('BrowserDetector','Rapport de compatibilité généré', report);
     })();
 
+    // Ticker panneau AudioContext
     function startContextTicker(ctx){
       stopContextTicker();
       ctxInterval=setInterval(()=>{ try{
@@ -138,25 +155,54 @@
     }
     function stopContextTicker(){ if(ctxInterval){ clearInterval(ctxInterval); ctxInterval=null; } }
 
-    // ---------- INITIALISER ----------
+    // Dessin oscilloscope
+    function drawScope(){
+      if (!analyser) return;
+      const N = analyser.fftSize;
+      const data = new Uint8Array(N);
+      analyser.getByteTimeDomainData(data);
+
+      // fond + grille
+      const W = scope.clientWidth, H = scope.clientHeight;
+      gl.clearRect(0,0,W,H);
+      gl.fillStyle = '#0b1020'; gl.fillRect(0,0,W,H);
+
+      gl.strokeStyle = 'rgba(255,255,255,0.06)'; gl.lineWidth = 1;
+      gl.beginPath(); gl.moveTo(0, H/2); gl.lineTo(W, H/2); gl.stroke(); // ligne médiane
+      for (let x=0; x<=W; x+=W/10){ gl.beginPath(); gl.moveTo(x,0); gl.lineTo(x,H); gl.stroke(); }
+
+      // courbe (forme d'onde temps réel)
+      gl.lineWidth = 2.2;
+      gl.strokeStyle = '#22c55e';
+      gl.beginPath();
+      const step = data.length / W; // un point par pixel horizontal
+      for (let x = 0; x < W; x++){
+        const i = Math.floor(x * step);
+        const v = (data[i] - 128) / 128; // [-1..1]
+        const y = H/2 - v * (H*0.45);     // amplitude
+        if (x === 0) gl.moveTo(x, y); else gl.lineTo(x, y);
+      }
+      gl.stroke();
+
+      drawRAF = requestAnimationFrame(drawScope);
+    }
+
+    // INITIALISER
     btnInit.addEventListener('click', async ()=>{
       addLog('[INFO] [Test] 🚀 Initialisation de l\'AudioEngine...');
       try{
         const opts={ sampleRate: CONFIG?.audio?.sampleRate ?? 48000, latencyHint:'interactive' };
 
-        // fabrique statique éventuelle
         if (typeof AudioEngine.create === 'function') {
           audioEngine = await AudioEngine.create(opts);
         } else if (typeof AudioEngine.initialize === 'function') {
           audioEngine = await AudioEngine.initialize(opts);
         }
-        // instance
         if (!audioEngine) {
           audioEngine = (typeof AudioEngine.getInstance === 'function')
             ? AudioEngine.getInstance(opts)
             : new AudioEngine(opts);
         }
-        // init d’instance si dispo
         const initFn =
           (typeof audioEngine.initialize === 'function' && 'initialize') ||
           (typeof audioEngine.init === 'function' && 'init') ||
@@ -179,59 +225,39 @@
       }
     });
 
-    // ---------- TESTER MICRO + VU ----------
+    // TEST MICRO + OSCILLOSCOPE
     btnMic.addEventListener('click', async ()=>{
       Logger.info('Test','🎤 Test du microphone...');
       try{
         if(!audioEngine){ addLog('[WARN] [Test] AudioEngine non initialisé.'); return; }
         if(!micManager){
-          micManager = new MicrophoneManager(audioEngine /*, eventBus */);
+          micManager = new MicrophoneManager(audioEngine);
           Logger.info('MicrophoneManager','MicrophoneManager créé');
         }
-        const ok = await micManager.requestPermission(); // alias → requestAccess()
+        const ok = await micManager.requestPermission();
         if(!ok){ addLog('[ERROR] [Test] Accès micro refusé ou erreur.'); return; }
 
         const stream = micManager.getStream();
         if(!stream){ addLog('[ERROR] [Test] Flux micro introuvable.'); return; }
 
-        const tracks = stream.getAudioTracks?.() ?? [];
-        Logger.info('Test','Piste micro',{ count:tracks.length, label:tracks[0]?.label||'N/A' });
-
         const source = micManager.createSource();
         if(!source){ addLog('[WARN] [Test] Flux ouvert, source WebAudio non créée.'); return; }
 
-        // VU-mètre
+        if (drawRAF){ cancelAnimationFrame(drawRAF); drawRAF=null; }
         const ctx = audioEngine.getContext?.();
         analyser = ctx.createAnalyser();
         analyser.fftSize = 2048;
         source.connect(analyser);
+        drawScope();
 
-        const canvas = document.getElementById('vu');
-        const g = canvas.getContext('2d');
-        const data = new Uint8Array(analyser.fftSize);
-
-        (function draw(){
-          if (!analyser) return;
-          analyser.getByteTimeDomainData(data);
-          let sum=0;
-          for (let i=0;i<data.length;i++){ const v=(data[i]-128)/128; sum+=v*v; }
-          const rms=Math.sqrt(sum/data.length);
-          const level=Math.min(1, rms*3); // boost visuel
-          g.clearRect(0,0,canvas.width,canvas.height);
-          g.fillStyle='#22c55e';
-          g.fillRect(0,0,canvas.width*level,canvas.height);
-          requestAnimationFrame(draw);
-        })();
-
-        Logger.info('Test','MediaStreamSource créé');
-        addLog('[INFO] [Test] Micro OK → flux ouvert & VU actif.');
+        addLog('[INFO] [Test] Micro OK → flux ouvert & oscilloscope actif.');
       }catch(e){
         Logger.error('Test','Erreur test micro',{ message:e?.message, name:e?.name });
         addLog(`[ERROR] [Test] ${e?.name??'Error'}: ${e?.message??e}`);
       }
     });
 
-    // ---------- ENREGISTRER 5s ----------
+    // ENREGISTRER 5s
     btnRec.addEventListener('click', async ()=>{
       try{
         if (!micManager || !micManager.isGranted()){
@@ -242,10 +268,11 @@
         if (!stream){ Logger.error('Test','Pas de stream micro.'); return; }
 
         const chunks=[];
-        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        const mt = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+        mediaRecorder = new MediaRecorder(stream, { mimeType: mt });
         mediaRecorder.ondataavailable = e => { if (e.data?.size) chunks.push(e.data); };
         mediaRecorder.onstop = () => {
-          const blob = new Blob(chunks, { type: 'audio/webm' });
+          const blob = new Blob(chunks, { type: mt });
           const url = URL.createObjectURL(blob);
           const audio=document.createElement('audio'); audio.controls=true; audio.src=url;
           const a=document.createElement('a'); a.href=url; a.download=`enregistrement-${Date.now()}.webm`; a.textContent='Télécharger (webm)';
@@ -266,9 +293,10 @@
       }
     });
 
-    // ---------- DÉTRUIRE ----------
+    // DÉTRUIRE
     btnDestroy.addEventListener('click', async ()=>{
       try{
+        if(drawRAF){ cancelAnimationFrame(drawRAF); drawRAF=null; }
         if(analyser){ try{ analyser.disconnect(); }catch{} analyser=null; }
         if(mediaRecorder?.state==='recording'){ try{ mediaRecorder.stop(); }catch{} }
         if(micManager){ micManager.destroy?.(); micManager=null; }
@@ -281,6 +309,7 @@
         sysStatus.innerHTML='Réinitialisé. Cliquez sur “Initialiser” pour recommencer.';
         btnMic.disabled=true; btnDestroy.disabled=true; btnRec.disabled=true;
         ctxState.textContent = ctxRate.textContent = ctxLatency.textContent = ctxTime.textContent = '—';
+        gl.clearRect(0,0,scope.clientWidth,scope.clientHeight);
         addLog('[INFO] [Test] Système détruit.');
       }catch(e){ addLog(`[ERROR] [Test] Destroy: ${e?.message??e}`); }
     });

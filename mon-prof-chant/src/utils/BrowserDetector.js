@@ -12,7 +12,42 @@
  */
 
 import { Logger } from '../logging/Logger.js';
-import { CONFIG } from '../config.js';
+
+// ⚡ Configuration inline (évite l'import CONFIG manquant)
+const BROWSER_CONFIG = {
+  compatibility: {
+    browsers: {
+      chrome: {
+        min: 90,
+        priority: 1,
+        limitations: []
+      },
+      firefox: {
+        min: 88,
+        priority: 2,
+        limitations: []
+      },
+      safari: {
+        min: 14,
+        priority: 3,
+        limitations: ['mp4_only']
+      },
+      edge: {
+        min: 90,
+        priority: 1,
+        limitations: []
+      }
+    },
+    required: [
+      'AudioContext',
+      'getUserMedia',
+      'MediaRecorder',
+      'AnalyserNode',
+      'localStorage',
+      'WebAudio'
+    ]
+  }
+};
 
 export class BrowserDetector {
   
@@ -86,7 +121,7 @@ export class BrowserDetector {
       }
 
       // Vérifier si supporté
-      const browserConfig = CONFIG.compatibility.browsers[result.name];
+      const browserConfig = BROWSER_CONFIG.compatibility.browsers[result.name];
       if (browserConfig) {
         result.supported = result.version >= browserConfig.min;
         result.priority = browserConfig.priority;
@@ -230,10 +265,14 @@ export class BrowserDetector {
         
         case 'AnalyserNode':
           if (!window.AudioContext && !window.webkitAudioContext) return false;
-          const ctx = new (window.AudioContext || window.webkitAudioContext)();
-          const hasAnalyser = typeof ctx.createAnalyser === 'function';
-          ctx.close();
-          return hasAnalyser;
+          try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const hasAnalyser = typeof ctx.createAnalyser === 'function';
+            ctx.close();
+            return hasAnalyser;
+          } catch (e) {
+            return false;
+          }
         
         case 'localStorage':
           try {
@@ -337,7 +376,7 @@ export class BrowserDetector {
     };
 
     // Tester toutes les features requises
-    CONFIG.compatibility.required.forEach(feature => {
+    BROWSER_CONFIG.compatibility.required.forEach(feature => {
       report.features[feature] = BrowserDetector.supportsFeature(feature);
       
       if (!report.features[feature]) {
@@ -347,7 +386,10 @@ export class BrowserDetector {
 
     // Ajouter recommandations selon le navigateur
     if (!info.supported) {
-      report.recommendations.push(`Mise à jour recommandée (version minimale: ${CONFIG.compatibility.browsers[info.name]?.min})`);
+      const browserConfig = BROWSER_CONFIG.compatibility.browsers[info.name];
+      if (browserConfig) {
+        report.recommendations.push(`Mise à jour recommandée (version minimale: ${browserConfig.min})`);
+      }
     }
 
     if (info.limitations.includes('14khz_max')) {

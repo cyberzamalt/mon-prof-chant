@@ -2,14 +2,14 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <title>Test Audio Core • Oscilloscope + Pitch</title>
+  <title>Test Audio Core • Pitch absolu (timeline)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root{--bg:#f7f7fb;--card:#fff;--text:#1f2937;--muted:#6b7280;--ok:#16a34a;--warn:#d97706;--err:#dc2626;--blue:#4f46e5;}
     *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,Arial}
-    .wrap{max-width:900px;margin:24px auto;padding:16px}
+    .wrap{max-width:1000px;margin:24px auto;padding:16px}
     .title{font-size:24px;font-weight:800;margin:8px 0 4px}
-    .subtitle{color:var(--muted);margin:0 0 20px}
+    .subtitle{color:var(--muted);margin:0 0 16px}
     .card{background:var(--card);border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin:12px 0}
     .row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
     .kv{border:1px solid #e5e7eb;border-radius:10px;padding:12px}
@@ -22,17 +22,32 @@
     .b3{background:#e11d48;color:#fff}
     .b4{background:#10b981;color:#fff}
     .b1[disabled],.b2[disabled],.b3[disabled]{opacity:.45;cursor:not-allowed}
-    pre{background:#0b1020;color:#dbeafe;border-radius:10px;padding:12px;max-height:320px;overflow:auto}
-    .ok{color:var(--ok)} .err{color:var(--err)} .muted{color:var(--muted)}
-    /* canvases */
-    .scope{width:100%;height:160px;background:#0b1020;border-radius:10px;display:block}
+    pre{background:#0b1020;color:#dbeafe;border-radius:10px;padding:12px;max-height:280px;overflow:auto}
+
     .pill{display:inline-block;background:#eef2ff;color:#374151;border:1px solid #c7d2fe;padding:6px 10px;border-radius:999px;font-weight:700}
+    .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .seg{display:inline-flex;overflow:hidden;border-radius:10px;border:1px solid #e5e7eb}
+    .seg button{background:#f3f4f6;color:#111827;border:0;padding:8px 10px}
+    .seg button.active{background:#111827;color:#fff}
+
+    /* Timeline conteneur + canvases */
+    .timeline-wrap{overflow-x:auto; overflow-y:hidden; border:1px solid #e5e7eb; border-radius:10px; background:#0b1020}
+    .tl-layer{display:block}
+    #pitchCanvas{height:260px; display:block}
+    #axisCanvas{height:32px; display:block; background:#0b1020}
+    .axis-label{color:#9ca3af; font-size:12px; margin-top:6px}
+
+    /* Curseur temps */
+    .cursor{position:absolute; top:0; bottom:0; width:2px; background:#f59e0b; pointer-events:none}
+
+    /* Container relatif pour curseur */
+    .relative{position:relative}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="title">🎤 Test Audio Core</div>
-    <p class="subtitle">Oscilloscope (amplitude) + Pitch (note & cents) — ligne médiane Pitch = 0 cents</p>
+    <p class="subtitle">Visualisation **Pitch absolu** (notes) avec timeline fixe, ligne médiane et règle de temps</p>
 
     <div class="card">
       <div class="badge">🔒 Protocole détecté : <span id="protoTxt" style="margin-left:6px">—</span></div>
@@ -77,16 +92,32 @@
     </div>
 
     <div class="card">
-      <div style="font-weight:800;margin-bottom:10px">Oscilloscope (forme d’onde)</div>
-      <canvas id="scope" class="scope" width="800" height="160"></canvas>
-    </div>
-
-    <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div style="font-weight:800">Pitch (note + cents) — <span style="opacity:.8">ligne médiane = 0 cents (référence)</span></div>
-        <div class="pill" id="pitchInfo">—</div>
+      <div class="toolbar" style="justify-content:space-between;margin-bottom:8px">
+        <div class="toolbar" style="gap:12px">
+          <div><b>Pitch</b> (ligne médiane = note de référence)</div>
+          <div class="seg" id="modeSeg">
+            <button data-mode="abs" class="active">Absolu (notes)</button>
+            <button data-mode="cents">Cents (justesse)</button>
+          </div>
+          <div class="seg" id="zoomSeg" title="Zoom vertical">
+            <button data-zoom="1" class="active">x1</button>
+            <button data-zoom="2">x2</button>
+            <button data-zoom="4">x4</button>
+          </div>
+          <span class="pill" id="pitchInfo">—</span>
+        </div>
+        <div class="pill" id="refInfo">Référence: —</div>
       </div>
-      <canvas id="pitch" class="scope" width="800" height="160"></canvas>
+
+      <div class="relative">
+        <div class="timeline-wrap" id="timeline">
+          <canvas id="pitchCanvas" class="tl-layer" width="1200"></canvas>
+          <canvas id="axisCanvas"  class="tl-layer" width="1200"></canvas>
+        </div>
+        <div id="cursor" class="cursor" style="left:0; display:none"></div>
+      </div>
+
+      <div class="axis-label">Échelle temps (s)</div>
     </div>
   </div>
 
@@ -116,32 +147,43 @@
     const navOS=document.getElementById('navOS');
     const navMob=document.getElementById('navMob');
 
-    const scope=document.getElementById('scope');
-    const pitchCanvas=document.getElementById('pitch');
-    const gScope=scope.getContext('2d');
+    const timeline=document.getElementById('timeline');
+    const pitchCanvas=document.getElementById('pitchCanvas');
+    const axisCanvas=document.getElementById('axisCanvas');
     const gPitch=pitchCanvas.getContext('2d');
+    const gAxis=axisCanvas.getContext('2d');
+
+    const modeSeg=document.getElementById('modeSeg');
+    const zoomSeg=document.getElementById('zoomSeg');
     const pitchInfo=document.getElementById('pitchInfo');
+    const refInfo=document.getElementById('refInfo');
+    const cursor=document.getElementById('cursor');
 
     function addLog(line){ const now=new Date().toTimeString().slice(0,8); logBox.textContent+=`\n[${now}] ${line}`; logBox.scrollTop=logBox.scrollHeight; }
-    Logger.setExternalSink?.((level,scope,msg,data)=>{const d=data?` | ${JSON.stringify(data)}`:''; addLog(`[${level}] [${scope}] ${msg}${d}`);});
+    Logger.setExternalSink?.((level,scope,msg,data)=>{ const d=data?` | ${JSON.stringify(data)}`:''; addLog(`[${level}] [${scope}] ${msg}${d}`); });
 
     // State
-    let audioEngine=null, micManager=null, analyser=null, mediaRecorder=null;
-    let rafScope=null, rafPitchDraw=null, rafPitchTick=null, ctxTicker=null;
-    const pitchPoints=[]; // {t, cents} historiques pour timeline
-    const WINDOW_SECONDS=20; // fenêtre visible défilante
+    let audioEngine=null, micManager=null, analyser=null, mediaRecorder=null, ctxTicker=null;
+    let mode='abs';           // 'abs' | 'cents'
+    let zoom=1;               // 1 | 2 | 4 (vertical zoom)
+    let refMidi=null;         // note de référence (midi)
+    let startT=null;          // t0 de la prise (performance.now()/1000)
+    let lastDrawDuration=0;   // durée déjà allouée sur canvas
+    const A4=440, NOTE=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    const PX_PER_SEC=100;     // densité horizontale : 100 px / seconde
+    const PX_PER_SEMITONE=20; // densité verticale pour "abs" à zoom 1
+    const MAX_MINUTES=15;     // garde-fou
+    const points=[];          // {t:seconds, midi, freq, cents, conf}
 
-    // DPR fit
-    function fitCanvasDPR(canvas, ctx){
-      const dpr=window.devicePixelRatio||1;
-      const w=canvas.clientWidth, h=canvas.clientHeight;
-      canvas.width=Math.round(w*dpr); canvas.height=Math.round(h*dpr);
-      ctx.setTransform(dpr,0,0,dpr,0,0);
+    // DPR helpers
+    const dpr=window.devicePixelRatio||1;
+    function setCanvasSize(canvas, cssW, cssH){
+      canvas.style.width=cssW+'px'; canvas.style.height=cssH+'px';
+      canvas.width=Math.round(cssW*dpr); canvas.height=Math.round(cssH*dpr);
+      const ctx=canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
     }
-    function fitAll(){ fitCanvasDPR(scope,gScope); fitCanvasDPR(pitchCanvas,gPitch); }
-    fitAll(); addEventListener('resize', fitAll);
 
-    // Boot: protocol + browser
+    // Boot
     (function(){
       const https = location.protocol==='https:' || location.hostname==='localhost';
       protoTxt.textContent = https ? 'HTTPS (sécurisé)' : 'HTTP (non sécurisé)';
@@ -152,11 +194,21 @@
       Logger.info('Protocol', https ? 'HTTPS détecté - Microphone accessible' : 'HTTP détecté - Activer HTTPS pour le micro');
       Logger.info('BrowserDetector','Détection du navigateur...');
       Logger.info('BrowserDetector',`${b?.name??'?'} ${b?.fullVersion??b?.version??''} sur ${b?.os??'?'}`, b);
-      const report=BrowserDetector.getCompatibilityReport?.() ?? {browser:b,features:{AudioContext:!!(window.AudioContext||window.webkitAudioContext),getUserMedia:!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia),MediaRecorder:'MediaRecorder'in window,AnalyserNode:!!(window.AudioContext||window.webkitAudioContext),localStorage:'localStorage'in window,WebAudio:!!(window.AudioContext||window.webkitAudioContext)},recommendations:[],warnings:[]};
-      Logger.info('BrowserDetector','Rapport de compatibilité généré', report);
     })();
 
-    // Context ticker (etat panneau)
+    // Mode / Zoom UI
+    modeSeg.addEventListener('click', (e)=>{
+      const btn=e.target.closest('button'); if(!btn) return;
+      mode=btn.dataset.mode; for(const b of modeSeg.querySelectorAll('button')) b.classList.toggle('active', b===btn);
+      redrawAll();
+    });
+    zoomSeg.addEventListener('click', (e)=>{
+      const btn=e.target.closest('button'); if(!btn) return;
+      zoom=Number(btn.dataset.zoom); for(const b of zoomSeg.querySelectorAll('button')) b.classList.toggle('active', b===btn);
+      redrawAll();
+    });
+
+    // Context ticker
     function startCtxTicker(ctx){
       stopCtxTicker();
       ctxTicker=setInterval(()=>{ try{
@@ -169,87 +221,134 @@
     }
     function stopCtxTicker(){ if(ctxTicker){ clearInterval(ctxTicker); ctxTicker=null; } }
 
-    // Utils: freq→note/cents
-    const A4=440, NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-    function freqToNoteData(freq){
-      if(!freq||!isFinite(freq)) return {note:'—',oct:'-',cents:0};
-      const midi=69+12*Math.log2(freq/A4);
-      const nearest=Math.round(midi);
-      const cents=Math.round((midi-nearest)*100);
-      const note=NAMES[(nearest+1200)%12];
-      const oct=Math.floor(nearest/12)-1;
-      return {note,oct,cents,freq};
+    // Maths
+    function midiFromFreq(freq){ return 69 + 12*Math.log2(freq/A4); }
+    function noteLabelFromMidi(m){
+      const i=((Math.round(m)%12)+12)%12; const o=Math.floor(Math.round(m)/12)-1;
+      return `${NOTE[i]}${o}`;
+    }
+    function centsFromMidi(m){
+      const nearest=Math.round(m);
+      return Math.round((m-nearest)*100);
     }
 
-    // Pitch (YIN simplifié)
-    function detectPitch(buf, sr){
-      const N=buf.length;
-      const tauMax=Math.min(Math.floor(sr/50), N-1);
-      const tauMin=Math.max(2, Math.floor(sr/1000));
-      const diff=new Float32Array(tauMax+1);
-      for(let tau=tauMin;tau<=tauMax;tau++){
-        let s=0; for(let i=0;i<N-tau;i++){ const d=buf[i]-buf[i+tau]; s+=d*d; }
-        diff[tau]=s;
+    // Layout / Drawing
+    function ensureCanvasDuration(seconds){
+      const maxSec = Math.min(seconds, MAX_MINUTES*60);
+      const needW = Math.max(1200, Math.ceil(maxSec*PX_PER_SEC));
+      // Si largeur nécessaire > largeur actuelle, on ré-alloue (et on re-dessine)
+      const cssW = needW;
+      setCanvasSize(pitchCanvas, cssW, 260);
+      setCanvasSize(axisCanvas,  cssW, 32);
+      lastDrawDuration=maxSec;
+    }
+
+    function yFromMidi(m){
+      // m relative to ref: Δsemitones (positif = aigu)
+      const dy=(m - (refMidi??m)); // si pas ref, 0 → centré
+      const H=260;
+      const pixelsPerSemi = PX_PER_SEMITONE*zoom;
+      const y = H/2 - dy*pixelsPerSemi;
+      return y;
+    }
+    function yFromCents(c){
+      const H=260;
+      // ±300 cents visibles env (ajusté par zoom)
+      const C_RANGE = 300/zoom; // plus de détails en zoom
+      const y = H/2 - (c / C_RANGE) * (H/2);
+      return y;
+    }
+
+    function drawAxis(durationSec){
+      const W=pitchCanvas.clientWidth, H=axisCanvas.clientHeight;
+      gAxis.clearRect(0,0,W,H);
+      gAxis.fillStyle='#0b1020'; gAxis.fillRect(0,0,W,H);
+      gAxis.strokeStyle='rgba(255,255,255,.25)'; gAxis.lineWidth=1;
+
+      // graduations chaque 1s, labels toutes les 5s
+      const totalSec = Math.ceil(durationSec);
+      for(let s=0; s<=totalSec; s++){
+        const x = s*PX_PER_SEC+0.5;
+        gAxis.beginPath(); gAxis.moveTo(x, 0); gAxis.lineTo(x, s%5===0?H: H*0.5); gAxis.stroke();
+        if (s%5===0){
+          const mm = Math.floor(s/60), ss=(s%60).toString().padStart(2,'0');
+          gAxis.fillStyle='#9ca3af';
+          gAxis.font='12px system-ui';
+          gAxis.fillText(`${mm}:${ss}`, x+4, H-6);
+        }
       }
-      const cmnd=new Float32Array(tauMax+1); let run=0;
-      for(let tau=tauMin;tau<=tauMax;tau++){ run+=diff[tau]; cmnd[tau]=diff[tau]*tau/(run||1); }
-      const th=0.12; let tau=tauMin;
-      for(;tau<=tauMax;tau++){ if(cmnd[tau]<th){ while(tau+1<=tauMax && cmnd[tau+1]<cmnd[tau]) tau++; break; } }
-      if(tau>tauMax) return {freq:null,conf:0};
-      const x0=(tau<=1)?tau:tau-1, x2=(tau+1<=tauMax)?tau+1:tau;
-      const y0=cmnd[x0], y1=cmnd[tau], y2=cmnd[x2], den=(y0+y2-2*y1);
-      const better=tau + (den ? ( (y0-y2)/(2*den) ) : 0);
-      return {freq: sr/better, conf: 1-y1};
     }
 
-    // Draw: oscilloscope (affiché seulement si micro actif)
-    function drawScope(){
-      if(!analyser){ gScope.clearRect(0,0,scope.clientWidth,scope.clientHeight); rafScope=requestAnimationFrame(drawScope); return; }
-      const N=analyser.fftSize, data=new Float32Array(N); analyser.getFloatTimeDomainData(data);
-      const W=scope.clientWidth, H=scope.clientHeight;
-      gScope.clearRect(0,0,W,H);
-      gScope.fillStyle='#0b1020'; gScope.fillRect(0,0,W,H);
-      gScope.strokeStyle='rgba(255,255,255,0.06)'; gScope.lineWidth=1;
-      gScope.beginPath(); gScope.moveTo(0,H/2); gScope.lineTo(W,H/2); gScope.stroke();
-      for(let x=0;x<=W;x+=W/10){ gScope.beginPath(); gScope.moveTo(x,0); gScope.lineTo(x,H); gScope.stroke(); }
-      gScope.lineWidth=2.2; gScope.strokeStyle='#22c55e'; gScope.beginPath();
-      const step=data.length/W; for(let x=0;x<W;x++){ const i=(x*step)|0; const v=data[i]; const y=H/2 - v*(H*0.45); x?gScope.lineTo(x,y):gScope.moveTo(x,y); }
-      gScope.stroke();
-      rafScope=requestAnimationFrame(drawScope);
-    }
-
-    // Draw: pitch timeline — TOUJOURS active (ligne médiane persistante)
-    function drawPitch(){
+    function drawPitch(durationSec){
       const W=pitchCanvas.clientWidth, H=pitchCanvas.clientHeight;
       gPitch.clearRect(0,0,W,H);
-      // Fond
+      // fond
       gPitch.fillStyle='#0b1020'; gPitch.fillRect(0,0,W,H);
-      // Grille verticale légère
-      gPitch.strokeStyle='rgba(255,255,255,0.06)'; gPitch.lineWidth=1;
-      for(let x=0;x<=W;x+=W/10){ gPitch.beginPath(); gPitch.moveTo(x,0); gPitch.lineTo(x,H); gPitch.stroke(); }
-      // LIGNE MÉDIANE PERSISTANTE (0 cents)
-      gPitch.strokeStyle='rgba(255,255,255,0.2)'; gPitch.lineWidth=1.5;
-      gPitch.beginPath(); gPitch.moveTo(0,H/2); gPitch.lineTo(W,H/2); gPitch.stroke();
-      // bornes ±200/±300 cents
-      gPitch.strokeStyle='rgba(255,255,255,0.08)';
-      [H*0.25, H*0.75].forEach(y=>{ gPitch.beginPath(); gPitch.moveTo(0,y); gPitch.lineTo(W,y); gPitch.stroke(); });
 
-      // Courbe si on a des points
-      const now=performance.now()/1000, tMin=now-WINDOW_SECONDS, viewSpan=WINDOW_SECONDS;
-      const visible=pitchPoints.filter(p=>p.t>=tMin);
-      if(visible.length>=2){
-        const centsRange=600; // ±300
-        gPitch.lineWidth=2.2; gPitch.strokeStyle='#60a5fa'; gPitch.beginPath();
-        let moved=false;
-        for(const p of visible){
-          if(!Number.isFinite(p.cents)) { moved=false; continue; } // trou (silence)
-          const x=((p.t - tMin)/viewSpan)*W;
-          const y=H/2 - (p.cents/(centsRange/2))*(H/2);
-          if(!moved){ gPitch.moveTo(x,y); moved=true; } else { gPitch.lineTo(x,y); }
+      // Grille horizontale (semitones ou repères cents)
+      gPitch.strokeStyle='rgba(255,255,255,.08)';
+      gPitch.lineWidth=1;
+      if (mode==='abs'){
+        // Lignes chaque demi-ton par rapport à la ref
+        const pixelsPerSemi = PX_PER_SEMITONE*zoom;
+        if (!refMidi){ // pas encore de ref → juste médiane
+          gPitch.beginPath(); gPitch.moveTo(0,H/2); gPitch.lineTo(W,H/2); gPitch.stroke();
+        } else {
+          // monte/descend jusqu'à limites visibles
+          for(let k=-50;k<=50;k++){ // borne large
+            const y = H/2 - k*pixelsPerSemi;
+            if (y<0||y>H) continue;
+            gPitch.strokeStyle = (k%2===0) ? 'rgba(255,255,255,.12)' : 'rgba(255,255,255,.06)';
+            gPitch.beginPath(); gPitch.moveTo(0,y); gPitch.lineTo(W,y); gPitch.stroke();
+          }
         }
-        gPitch.stroke();
+      } else {
+        // Cents: médiane 0, repères ±100, ±200
+        const bands=[0,100,200,-100,-200];
+        for (const c of bands){
+          const y=yFromCents(c);
+          gPitch.strokeStyle = c===0 ? 'rgba(255,255,255,.25)' : 'rgba(255,255,255,.08)';
+          gPitch.beginPath(); gPitch.moveTo(0,y); gPitch.lineTo(W,y); gPitch.stroke();
+        }
       }
-      rafPitchDraw=requestAnimationFrame(drawPitch);
+
+      // Courbe
+      if (points.length<2) return;
+      gPitch.lineWidth=2.2; gPitch.strokeStyle='#60a5fa'; gPitch.beginPath();
+      let moved=false;
+      for (const p of points){
+        const x=p.t*PX_PER_SEC + 0.5;
+        let y;
+        if (mode==='abs'){
+          if (!refMidi) continue; // on attend la ref
+          if (!isFinite(p.midi)) { moved=false; continue; }
+          y = yFromMidi(p.midi);
+        } else {
+          if (!Number.isFinite(p.cents)) { moved=false; continue; }
+          y = yFromCents(p.cents);
+        }
+        if (!moved){ gPitch.moveTo(x,y); moved=true; } else { gPitch.lineTo(x,y); }
+      }
+      gPitch.stroke();
+
+      // ligne médiane
+      gPitch.strokeStyle='rgba(255,255,255,.25)'; gPitch.lineWidth=1.5;
+      gPitch.beginPath(); gPitch.moveTo(0,H/2); gPitch.lineTo(W,H/2); gPitch.stroke();
+
+      // curseur
+      if (startT!=null){
+        const now=performance.now()/1000;
+        const x=(now-startT)*PX_PER_SEC;
+        cursor.style.display='block';
+        cursor.style.left = (x - timeline.scrollLeft) + 'px';
+      }
+    }
+
+    function redrawAll(){
+      const duration = points.length? points[points.length-1].t : 0;
+      ensureCanvasDuration(duration+1);
+      drawAxis(duration);
+      drawPitch(duration);
     }
 
     // INITIALISER
@@ -257,7 +356,6 @@
       addLog('[INFO] [Test] 🚀 Initialisation de l\'AudioEngine...');
       try{
         const opts={ sampleRate: CONFIG?.audio?.sampleRate ?? 48000, latencyHint:'interactive' };
-        // création/initialisation compatible
         if (typeof AudioEngine.create==='function') audioEngine=await AudioEngine.create(opts);
         else if (typeof AudioEngine.initialize==='function') audioEngine=await AudioEngine.initialize(opts);
         if(!audioEngine) audioEngine=(typeof AudioEngine.getInstance==='function')?AudioEngine.getInstance(opts):new AudioEngine(opts);
@@ -270,18 +368,18 @@
 
         startCtxTicker(ctx);
         btnMic.disabled=false; btnDestroy.disabled=false; btnRec.disabled=false;
-        sysStatus.innerHTML='<span class="ok">Système initialisé avec succès</span><br>AudioEngine opérationnel. Vous pouvez maintenant tester le microphone.';
+        sysStatus.innerHTML='<span style="color:var(--ok)">Système initialisé avec succès</span><br>AudioEngine opérationnel. Vous pouvez maintenant tester le microphone.';
 
-        // Lancer les boucles de dessin (scope démarre “vide” tant que pas de micro)
-        if(!rafScope) rafScope=requestAnimationFrame(drawScope);
-        if(!rafPitchDraw) rafPitchDraw=requestAnimationFrame(drawPitch);
+        // taille initiale
+        ensureCanvasDuration(12); // 12s visibles au départ
+        drawAxis(12); drawPitch(0);
       }catch(e){
-        sysStatus.innerHTML=`<span class="err">Échec d'initialisation</span><br>${e?.message??e}`;
+        sysStatus.innerHTML=`<span style="color:var(--err)">Échec d'initialisation</span><br>${e?.message??e}`;
         addLog(`[ERROR] [Test] Init AudioEngine: ${e?.message??e}`);
       }
     });
 
-    // TEST MICRO + pitch
+    // TEST MICRO + enregistrement des points
     btnMic.addEventListener('click', async ()=>{
       Logger.info('Test','🎤 Test du microphone...');
       try{
@@ -289,31 +387,62 @@
         if(!micManager){ micManager=new MicrophoneManager(audioEngine); }
         const ok=await micManager.requestPermission(); if(!ok){ addLog('[ERROR] [Test] Accès micro refusé.'); return; }
         const src=micManager.createSource(); if(!src){ addLog('[WARN] [Test] Source WebAudio non créée.'); return; }
+
         const ctx=audioEngine.getContext?.();
         analyser = ctx.createAnalyser(); analyser.fftSize=2048; src.connect(analyser);
 
-        // Boucle scope déjà lancée; on lance la boucle de détection (indépendante de l’affichage)
+        // reset prise
+        points.length=0; refMidi=null; startT=performance.now()/1000; refInfo.textContent='Référence: —';
+        redrawAll();
+
+        // boucle pitch
         const buf=new Float32Array(analyser.fftSize);
-        const tick=()=>{
-          if(!analyser) { rafPitchTick=requestAnimationFrame(tick); return; }
+        const loop=()=>{
+          if(!analyser){ requestAnimationFrame(loop); return; }
           analyser.getFloatTimeDomainData(buf);
           const {freq, conf}=detectPitch(buf, ctx.sampleRate);
-          if(freq && conf>0.6){
-            const d=freqToNoteData(freq);
-            pitchInfo.textContent=`${d.note}${d.oct} • ${freq.toFixed(1)} Hz • ${d.cents>0?'+':''}${d.cents} cents`;
-            pitchPoints.push({ t: performance.now()/1000, cents: d.cents });
-          }else{
-            // silence / pas de pitch : pousser un “trou” pour que la timeline avance
-            pitchPoints.push({ t: performance.now()/1000, cents: NaN });
-          }
-          // purge (gardez 2 fenêtres pour un peu d'historique)
-          const cutoff=(performance.now()/1000) - WINDOW_SECONDS*2;
-          while(pitchPoints.length && pitchPoints[0].t < cutoff) pitchPoints.shift();
-          rafPitchTick=requestAnimationFrame(tick);
-        };
-        if(!rafPitchTick) rafPitchTick=requestAnimationFrame(tick);
+          const now=performance.now()/1000;
+          const t=now-startT;
 
-        addLog('[INFO] [Test] Micro OK → oscilloscope + pitch actifs (ligne médiane persistante).');
+          if(freq && conf>0.6){
+            const midi=midiFromFreq(freq);
+            const cents=centsFromMidi(midi);
+
+            // référence = première note stable
+            if(refMidi==null) { refMidi=Math.round(midi); refInfo.textContent=`Référence: ${noteLabelFromMidi(refMidi)}`; }
+
+            pitchInfo.textContent=`${noteLabelFromMidi(Math.round(midi))} • ${freq.toFixed(1)} Hz • ${cents>0?'+':''}${cents} cents`;
+            points.push({t, midi, freq, cents, conf});
+          }else{
+            // silence : trou (garde la timeline)
+            points.push({t, midi:NaN, freq:NaN, cents:NaN, conf:0});
+          }
+
+          // augmenter largeur si besoin & dessiner incrémentalement
+          const duration = t;
+          if (duration > lastDrawDuration-1){
+            ensureCanvasDuration(duration+3);
+          }
+          drawAxis(duration);
+          drawPitch(duration);
+
+          requestAnimationFrame(loop);
+        };
+        requestAnimationFrame(loop);
+
+        addLog('[INFO] [Test] Micro OK → pitch absolu actif (timeline fixe).');
+        // auto-scroll pendant la prise
+        const autoScroll=()=>{
+          if(startT==null) return;
+          const now=performance.now()/1000;
+          const x=(now-startT)*PX_PER_SEC;
+          const margin=100;
+          if (x > timeline.scrollLeft + timeline.clientWidth - margin){
+            timeline.scrollLeft = x - timeline.clientWidth + margin;
+          }
+          requestAnimationFrame(autoScroll);
+        };
+        requestAnimationFrame(autoScroll);
       }catch(e){
         Logger.error('Test','Erreur test micro',{message:e?.message,name:e?.name});
         addLog(`[ERROR] [Test] ${e?.name??'Error'}: ${e?.message??e}`);
@@ -349,9 +478,6 @@
     // DÉTRUIRE
     btnDestroy.addEventListener('click', async ()=>{
       try{
-        if(rafScope){ cancelAnimationFrame(rafScope); rafScope=null; }
-        if(rafPitchDraw){ cancelAnimationFrame(rafPitchDraw); rafPitchDraw=null; }
-        if(rafPitchTick){ cancelAnimationFrame(rafPitchTick); rafPitchTick=null; }
         analyser?.disconnect(); analyser=null;
         if(mediaRecorder?.state==='recording'){ try{ mediaRecorder.stop(); }catch{} }
         micManager?.destroy?.(); micManager=null;
@@ -361,10 +487,11 @@
           audioEngine=null;
         }
         stopCtxTicker();
-        pitchPoints.length=0;
-        gScope.clearRect(0,0,scope.clientWidth,scope.clientHeight);
-        gPitch.clearRect(0,0,pitchCanvas.clientWidth,pitchCanvas.clientHeight);
-        pitchInfo.textContent='—';
+        points.length=0; refMidi=null; startT=null; lastDrawDuration=0;
+        setCanvasSize(pitchCanvas, 1200, 260); setCanvasSize(axisCanvas, 1200, 32);
+        drawAxis(12); drawPitch(0);
+        cursor.style.display='none';
+        pitchInfo.textContent='—'; refInfo.textContent='Référence: —';
         btnMic.disabled=true; btnDestroy.disabled=true; btnRec.disabled=true;
         ctxState.textContent=ctxRate.textContent=ctxLatency.textContent=ctxTime.textContent='—';
         sysStatus.innerHTML='Réinitialisé. Cliquez sur “Initialiser” pour recommencer.';
@@ -373,6 +500,27 @@
     });
 
     btnClear.addEventListener('click', ()=>{ logBox.textContent='Système de logs prêt…'; });
+
+    // --- Pitch detection (YIN simplifié) ---
+    function detectPitch(buf, sr){
+      const N=buf.length;
+      const tauMax=Math.min(Math.floor(sr/50), N-1);
+      const tauMin=Math.max(2, Math.floor(sr/1000));
+      const diff=new Float32Array(tauMax+1);
+      for(let tau=tauMin;tau<=tauMax;tau++){
+        let s=0; for(let i=0;i<N-tau;i++){ const d=buf[i]-buf[i+tau]; s+=d*d; }
+        diff[tau]=s;
+      }
+      const cmnd=new Float32Array(tauMax+1); let run=0;
+      for(let tau=tauMin;tau<=tauMax;tau++){ run+=diff[tau]; cmnd[tau]=diff[tau]*tau/(run||1); }
+      const th=0.12; let tau=tauMin;
+      for(;tau<=tauMax;tau++){ if(cmnd[tau]<th){ while(tau+1<=tauMax && cmnd[tau+1]<cmnd[tau]) tau++; break; } }
+      if(tau>tauMax) return {freq:null,conf:0};
+      const x0=(tau<=1)?tau:tau-1, x2=(tau+1<=tauMax)?tau+1:tau;
+      const y0=cmnd[x0], y1=cmnd[tau], y2=cmnd[x2], den=(y0+y2-2*y1);
+      const better=tau + (den ? ( (y0-y2)/(2*den) ) : 0);
+      return {freq: sr/better, conf: 1-y1};
+    }
   </script>
 </body>
 </html>

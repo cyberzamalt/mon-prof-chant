@@ -1,51 +1,23 @@
-// AudioEngine.js — garantit un AudioContext non nul et running
-import { Logger } from '../../logging/Logger.js';
-
-let _instance = null;
-
+// AudioEngine.js — Singleton simple, crée l'AudioContext UNIQUEMENT après un geste user.
 export default class AudioEngine {
-  constructor(opts={}) {
-    this.opts = opts;
-    this.ctx = null;
-    this.ready = false;
-    Logger.info('AudioEngine', 'Constructor called', opts);
+  #ctx = null;
+  #ready = false;
+  constructor(cfg={}) {
+    this.cfg = { sampleRate: 48000, latencyHint: 'interactive', ...cfg };
   }
-
-  static getInstance(opts={}) {
-    if(!_instance) _instance = new AudioEngine(opts);
-    return _instance;
+  isReady(){ return this.#ready && !!this.#ctx; }
+  async init(){
+    if (this.#ready && this.#ctx) return true;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) throw new Error('Web Audio non supporté');
+    // Important: créer le contexte suite à l’appel provenant d’un événement utilisateur
+    this.#ctx = new AC({ sampleRate: this.cfg.sampleRate, latencyHint: this.cfg.latencyHint });
+    if (this.#ctx.state === 'suspended') { await this.#ctx.resume(); }
+    this.#ready = true;
+    return true;
   }
-
-  async initialize(){
-    if(this.ctx) return;
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if(!Ctx) throw new Error('WebAudio non supporté');
-    this.ctx = new Ctx({ sampleRate: this.opts.sampleRate ?? undefined, latencyHint: this.opts.latencyHint ?? 'interactive' });
-    Logger.info('AudioEngine', 'AudioContext created', { sampleRate: this.ctx.sampleRate, state: this.ctx.state });
-  }
-
-  async resume(){
-    if(!this.ctx) await this.initialize();
-    if(this.ctx.state !== 'running'){
-      Logger.info('AudioEngine', 'Resuming context…');
-      await this.ctx.resume();
-      Logger.info('AudioEngine', 'Context resumed', { state: this.ctx.state });
-    }
-    this.ready = (this.ctx && this.ctx.state === 'running');
-  }
-
-  getContext(){
-    if(!this.ctx) Logger.warn('AudioEngine', 'getContext() called but context is null');
-    return this.ctx || null;
-  }
-
-  isReady(){ return !!this.ready && !!this.ctx && this.ctx.state==='running'; }
-
-  async close(){
-    if(this.ctx){
-      await this.ctx.close();
-      this.ctx = null; this.ready=false;
-      Logger.info('AudioEngine', 'Context closed');
-    }
-  }
+  ctx(){ if(!this.#ctx) throw new Error('AudioContext non initialisé'); return this.#ctx; }
+  currentTime(){ return this.#ctx?.currentTime ?? 0; }
+  sampleRate(){ return this.#ctx?.sampleRate ?? 0; }
+  async destroy(){ try{ await this.#ctx?.close(); }catch{} this.#ctx=null; this.#ready=false; }
 }

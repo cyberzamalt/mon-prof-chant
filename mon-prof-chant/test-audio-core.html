@@ -2,271 +2,255 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <title>Test Audio Core — Pitch (cents/notes) + Timeline (ligne médiane)</title>
+  <title>Test Audio Core — Pitch + Timeline (ligne médiane)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root{
-      --bg:#0b1220;--card:#0f172a;--ink:#e5e7eb;--muted:#9ca3af;
-      --ok:#22c55e;--warn:#f59e0b;--err:#ef4444;--brand:#6366f1;
-      --axis:#334155;--grid:#1f2937;--accent:#38bdf8;--mid:#94a3b8;
+      --bg:#0b0f17;--card:#0f1522;--ink:#e5eefc;--muted:#8aa2c0;
+      --green:#10b981;--red:#ef4444;--amber:#f59e0b;--blue:#3b82f6;--axis:#2b3344;
+      --line:#7dd3fc;--median:#22c55e;--cursor:#f59e0b;
     }
-    *{box-sizing:border-box} html,body{height:100%}
-    body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 ui-sans-serif,system-ui,Segoe UI,Roboto,Arial}
-    .wrap{max-width:980px;margin:16px auto;padding:0 12px}
-    h1{font-size:18px;margin:8px 0 14px}
-    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-    button{padding:8px 12px;border:1px solid #1f2937;background:#111827;color:#e5e7eb;border-radius:9px;cursor:pointer;font-weight:700}
-    button.green{background:#064e3b;border-color:#065f46}
-    button.blue{background:#1e293b;border-color:#1e40af}
-    button.red{background:#3f1d1d;border-color:#7f1d1d}
-    button[disabled]{opacity:.45;cursor:not-allowed}
-    .toggle{display:inline-flex;border-radius:10px;overflow:hidden;border:1px solid #1f2937}
-    .toggle button{border:0;padding:7px 10px}
-    .toggle .on{background:#064e3b} .toggle .off{background:#1f2937}
-    .card{background:var(--card);border:1px solid #0b1220;border-radius:12px;padding:12px;margin:12px 0;box-shadow:0 2px 10px rgba(0,0,0,.25)}
-    .hint{color:var(--muted);font-size:12px}
-    .bad{color:var(--err)} .ok{color:var(--ok)} .muted{color:var(--muted)}
-    .console{background:#0b1020;border-radius:10px;padding:10px;font-family:ui-monospace,Consolas,monospace;white-space:pre-wrap;max-height:220px;overflow:auto}
-    .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-    .chip{background:#111827;border:1px solid #1f2937;border-radius:999px;padding:6px 10px;font-size:12px}
-    canvas{display:block;width:100%;height:340px;background:#0b1220;border-radius:10px;border:1px solid #0b1220}
-    .downloads{display:flex;gap:8px;margin-top:8px}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui,Segoe UI,Roboto,Arial}
+    .wrap{max-width:1100px;margin:24px auto;padding:0 16px}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .btn{border:1px solid #30405a;background:#192030;color:var(--ink);padding:9px 12px;border-radius:10px;font-weight:700;cursor:pointer}
+    .btn[disabled]{opacity:.45;cursor:not-allowed}
+    .btn.ok{background:var(--green);border-color:var(--green);color:#062712}
+    .btn.dng{background:var(--red);border-color:var(--red)}
+    .btn.alt{background:#1d2435}
+    .chip{padding:6px 10px;border-radius:999px;border:1px solid #314158;background:#182034;color:var(--muted);font-weight:700}
+    .panel{background:var(--card);border:1px solid #1b2435;border-radius:14px;padding:14px;margin:10px 0}
+    h1{margin:0 0 8px;font-size:20px}
+    canvas{width:100%;height:360px;display:block;background:#0c1320;border-radius:12px;border:1px solid #1b2435}
+    .gridnote{font-size:12px;color:var(--muted)}
+    .sp{flex:1}
+    .legend{display:flex;gap:10px;align-items:center;color:var(--muted);font-size:12px;margin-top:6px}
+    .dot{width:10px;height:3px;border-radius:2px;display:inline-block;background:var(--line)}
+    .dot.median{background:var(--median)}
+    .dot.cursor{background:var(--cursor)}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>🎤 Test Audio Core — <b>Pitch (cents/notes) + Timeline (ligne médiane)</b></h1>
+    <h1>🎚️ Test Audio Core — Pitch (cents/notes) + Timeline (ligne médiane)</h1>
 
-    <div class="row toolbar">
-      <button id="btnInit" class="green">Activer micro</button>
-
-      <div class="toggle">
-        <button id="tgLiveOff" class="off">Moniteur live OFF</button>
-        <button id="tgLiveOn" class="on">ON</button>
+    <div class="panel">
+      <div class="row">
+        <button id="btnMic" class="btn ok">Activer micro</button>
+        <div class="row" style="align-items:center;gap:6px">
+          <span class="chip">Moniteur live</span>
+          <button id="monOFF" class="btn alt">OFF</button>
+          <button id="monON"  class="btn alt">ON</button>
+        </div>
+        <div class="sp"></div>
+        <button id="btnRec" class="btn">▶️ Démarrer l’enregistrement</button>
+        <button id="btnStop" class="btn dng" disabled>⏹ Stop</button>
+        <span id="timer" class="chip">00:00</span>
       </div>
-
-      <button id="btnRec" class="blue">▶️ Démarrer l'enregistrement</button>
-      <button id="btnStop" class="red" disabled>⏹️ Stop</button>
-      <span id="timer" class="chip">00:00</span>
-
-      <div class="toggle">
-        <button id="modeCents" class="on">Cents (justesse)</button>
-        <button id="modeNotes" class="off">Absolu (notes)</button>
-      </div>
-
-      <div class="toggle">
-        <button data-zoom="1" class="on">x1</button>
-        <button data-zoom="2" class="off">x2</button>
-        <button data-zoom="4" class="off">x4</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="hint">Astuce : la courbe ne s’affiche que si <b>Moniteur live = ON</b> ou pendant un <b>enregistrement</b>. La <b>barre orange</b> (curseur temps) ne bouge que dans ces cas.</div>
-      <div style="margin:8px 0 6px" class="muted">
-        <span id="pitchRead">—</span> • <span id="refNote">Référence : —</span>
-      </div>
-      <canvas id="plot"></canvas>
-      <div class="downloads">
-        <button id="dlWebM" disabled>📥 Télécharger WebM</button>
-        <button id="dlWav" disabled>📤 Exporter en WAV</button>
-        <button id="dlMp3" disabled>🎧 Exporter en MP3</button>
+      <div class="row" style="margin-top:8px">
+        <button class="btn alt" data-zoom="1">x1</button>
+        <button class="btn alt" data-zoom="2">x2</button>
+        <button class="btn alt" data-zoom="4">x4</button>
+        <div class="sp"></div>
+        <button id="modeCents" class="btn alt">Cents (justesse)</button>
+        <button id="modeNotes" class="btn alt">Absolu (notes)</button>
       </div>
     </div>
 
-    <div class="card">
-      <div style="font-weight:700;margin-bottom:6px">Console</div>
-      <div id="log" class="console">Système de logs prêt…</div>
+    <div class="panel">
+      <canvas id="pitchCanvas" width="1200" height="360"></canvas>
+      <div class="legend">
+        <span class="dot"></span>Courbe de pitch (continu)
+        <span class="dot median"></span>Ligne médiane (0 cent / note de référence)
+        <span class="dot cursor"></span>Curseur temps (enregistrement)
+        <span class="sp"></span>
+        <span class="gridnote">Astuce : la courbe n’apparaît qu’en <b>Moniteur live ON</b> ou pendant un <b>enregistrement</b>.</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <button id="btnDLWebm" class="btn alt">⬇️ Télécharger WebM</button>
+        <button id="btnDLWav"  class="btn alt">🎧 Exporter en WAV</button>
+        <button id="btnDLMP3"  class="btn alt">💽 Exporter en MP3</button>
+      </div>
+      <pre id="log" class="panel" style="margin:12px 0 0;max-height:180px;overflow:auto;background:#0b0f17;border:1px solid #1b2435"></pre>
     </div>
   </div>
 
+  <!-- Libs (Pitchy pour la détection) -->
+  <script src="https://cdn.jsdelivr.net/npm/pitchy@4.1.0/dist/pitchy.min.js"></script>
+
+  <!-- Code app -->
   <script type="module">
     import AudioEngine from './src/audio/core/AudioEngine.js';
-    import { Logger } from './src/logging/Logger.js';
     import MicrophoneManager from './src/audio/core/MicrophoneManager.js';
-    import PitchService from './src/audio/analysis/PitchService.js';
-    import TimelineRenderer from './src/plot/TimelineRenderer.js';
-    import { CONFIG } from './src/config.js';
+    import PitchDetector from './src/audio/analysis/PitchDetector.js';
+    import PitchCurveDisplay from './src/audio/visualization/PitchCurveDisplay.js';
 
-    // === UI refs ===
-    const logBox = document.getElementById('log');
-    const btnInit = document.getElementById('btnInit');
-    const tgLiveOff = document.getElementById('tgLiveOff');
-    const tgLiveOn  = document.getElementById('tgLiveOn');
-    const btnRec = document.getElementById('btnRec');
-    const btnStop = document.getElementById('btnStop');
-    const timer = document.getElementById('timer');
-    const modeCents = document.getElementById('modeCents');
-    const modeNotes = document.getElementById('modeNotes');
-    const plotCanvas = document.getElementById('plot');
-    const dlWebM = document.getElementById('dlWebM');
-    const dlWav  = document.getElementById('dlWav');
-    const dlMp3  = document.getElementById('dlMp3');
-    const pitchRead = document.getElementById('pitchRead');
-    const refNote = document.getElementById('refNote');
+    // ——— util UI
+    const $ = s => document.querySelector(s);
+    const logBox = $('#log');
+    const addLog = m => { const t = new Date().toTimeString().slice(0,5); logBox.textContent += `[${t}] ${m}\n`; logBox.scrollTop = logBox.scrollHeight; };
 
-    // === Logging to UI ===
-    function appendLog(line){ const now=new Date().toTimeString().slice(0,8); logBox.textContent += `\n[${now}] ${line}`; logBox.scrollTop=logBox.scrollHeight; }
-    Logger.setExternalSink?.((level, scope, msg, data) => {
-      const d = data ? ` | ${JSON.stringify(data)}` : '';
-      appendLog(`[${level}] [${scope}] ${msg}${d}`);
+    // ——— UI refs
+    const btnMic  = $('#btnMic');
+    const monOFF  = $('#monOFF');
+    const monON   = $('#monON');
+    const btnRec  = $('#btnRec');
+    const btnStop = $('#btnStop');
+    const timerEl = $('#timer');
+    const btnDLWebm = $('#btnDLWebm');
+    const btnDLWav  = $('#btnDLWav');
+    const btnDLMP3  = $('#btnDLMP3');
+    const zoomBtns  = [...document.querySelectorAll('[data-zoom]')];
+    const modeCents = $('#modeCents');
+    const modeNotes = $('#modeNotes');
+
+    // ——— modules
+    let engine, mic, detector, display;
+    let source = null;
+    let recording = false;
+    let monitorLive = false;
+    let t0 = 0;
+    let recTimer = null;
+    let recordedBlob = null;
+
+    // ——— display
+    display = new PitchCurveDisplay(document.getElementById('pitchCanvas'), {
+      mode: 'cents',      // 'cents' | 'notes'
+      yZoom: 1,           // 1/2/4
+      showCursor: false,
     });
 
-    // === Runtime state ===
-    let engine=null, mic=null, pitch=null, plot=null;
-    let live=false, recording=false, t0=0, rafId=null, timerId=null;
+    // ——— boutons zoom & modes
+    zoomBtns.forEach(b=>{
+      b.addEventListener('click', ()=>{
+        display.setZoom(parseInt(b.dataset.zoom,10));
+      });
+    });
+    modeCents.addEventListener('click', ()=>display.setMode('cents'));
+    modeNotes.addEventListener('click', ()=>display.setMode('notes'));
 
-    // === Init plot ===
-    plot = new TimelineRenderer(plotCanvas, { mode:'cents', zoom:1 });
-    plot.setMedianLabel('0 cents (réf.)');
-    plot.onLayoutFixed(); // calc marges, évite chevauchement
-
-    function setMode(mode){
-      if(mode==='cents'){ plot.setMode('cents'); modeCents.className='on'; modeNotes.className='off'; }
-      else { plot.setMode('notes'); modeCents.className='off'; modeNotes.className='on'; }
-      plot.renderStatic();
-    }
-    setMode('cents');
-
-    function setZoom(z){
-      document.querySelectorAll('[data-zoom]').forEach(b=>b.className='off');
-      const btn = document.querySelector(`[data-zoom="${z}"]`); if(btn) btn.className='on';
-      plot.setZoom(Number(z));
-      plot.renderStatic();
-    }
-    setZoom(1);
-
-    // === Timer ===
+    // ——— minuterie
     function startTimer(){
       stopTimer();
-      timer.textContent='00:00';
-      t0 = performance.now();
-      timerId = setInterval(()=>{
-        const s = Math.max(0, Math.floor((performance.now()-t0)/1000));
+      recTimer = setInterval(()=>{
+        const s = Math.max(0, Math.floor(engine.currentTime() - t0));
         const mm = String(Math.floor(s/60)).padStart(2,'0');
         const ss = String(s%60).padStart(2,'0');
-        timer.textContent = `${mm}:${ss}`;
-      }, 250);
+        timerEl.textContent = `${mm}:${ss}`;
+      }, 200);
     }
-    function stopTimer(){ if(timerId){clearInterval(timerId); timerId=null;} }
-
-    // === Engine bootstrap (user gesture) ===
-    async function ensureEngineReady(){
-      if(engine?.isReady?.()) return engine;
-      const opts = { sampleRate: CONFIG?.audio?.sampleRate ?? 48000, latencyHint:'interactive' };
-      engine = AudioEngine.getInstance ? AudioEngine.getInstance(opts) : new AudioEngine(opts);
-      await engine.initialize?.();
-      await engine.resume?.();
-      if(!engine.getContext?.()) throw new Error('AudioContext introuvable');
-      return engine;
+    function stopTimer(){
+      if(recTimer) { clearInterval(recTimer); recTimer=null; }
     }
 
-    // === Live / Record loops ===
-    function loop(){
-      const now = (performance.now()-t0)/1000;
-      const meas = pitch?.measure();
-      if(meas){
-        // meas: { t, hz, noteName, cents } ; noteName peut être null si non fiable
-        if(plot.mode==='cents' && typeof meas.cents==='number'){
-          plot.pushPoint(now, meas.cents);
-          pitchRead.textContent = `${meas.noteName ?? '—'} • ${meas.hz?.toFixed(1) ?? '—'} Hz • ${(meas.cents>0?'+':'')}${Math.round(meas.cents)} c`;
-        } else if(plot.mode==='notes' && typeof meas.hz==='number'){
-          plot.pushNote(now, meas.hz);
-          pitchRead.textContent = `${meas.noteName ?? '—'} • ${meas.hz.toFixed(1)} Hz`;
-        }
-        plot.setCursor(now);
-        plot.renderDynamic();
+    // ——— init Audio (sur geste utilisateur)
+    async function ensureAudioReady() {
+      if (!engine) engine = new AudioEngine();
+      if (!engine.isReady()) {
+        await engine.init(); // crée AudioContext suite au clic
+        addLog('[INFO] AudioEngine prêt');
       }
-      if(live || recording) rafId = requestAnimationFrame(loop);
     }
 
-    function startLive(){
-      if(live) return;
-      live = true;
-      if(!recording){ t0 = performance.now(); plot.startIfIdle(); }
-      rafId = requestAnimationFrame(loop);
-    }
-    function stopLive(){
-      live = false;
-      if(!recording && rafId){ cancelAnimationFrame(rafId); rafId=null; }
-    }
-
-    // === UI handlers ===
-    btnInit.addEventListener('click', async () => {
+    // ——— Micro
+    btnMic.addEventListener('click', async ()=>{
       try{
-        appendLog('[INFO] Init moteur & micro…');
-        await ensureEngineReady(); // AudioContext running ici (geste utilisateur)
-        mic = new MicrophoneManager(engine);
-        const ok = await mic.requestAccess();
-        if(!ok) throw new Error('Accès micro refusé');
-        const stream = mic.getStream();
-        pitch = new PitchService(engine, { onReadyNote:(name)=>refNote.textContent=`Référence : ${name}` });
-        await pitch.attachStream(stream);
-        btnRec.disabled=false;
-        appendLog('[INFO] Micro prêt. Moniteur live OFF par défaut.');
-      }catch(e){
-        appendLog(`[ERROR] Init: ${e?.message || e}`); 
-      }
+        await ensureAudioReady();
+        if (!mic) mic = new MicrophoneManager(engine);
+        await mic.open();
+        source = mic.createSource();
+        addLog('[INFO] Micro activé');
+        btnMic.disabled = true;
+      }catch(e){ addLog(`[ERROR] Micro: ${e.message||e}`); }
     });
 
-    tgLiveOn.addEventListener('click', ()=>{
-      if(!pitch){ appendLog('[WARN] Active d\'abord le micro.'); return; }
-      tgLiveOn.className='on'; tgLiveOff.className='off';
-      startLive();
-    });
-    tgLiveOff.addEventListener('click', ()=>{
-      tgLiveOn.className='off'; tgLiveOff.className='on';
-      stopLive();
-    });
+    // ——— Moniteur live
+    function setMonitor(on){
+      monitorLive = !!on;
+      monON.classList.toggle('ok', monitorLive);
+      monOFF.classList.toggle('dng', !monitorLive);
+      display.setLive(monitorLive);
+      addLog(`[INFO] Moniteur live ${monitorLive?'ON':'OFF'}`);
+    }
+    monOFF.addEventListener('click', ()=>setMonitor(false));
+    monON .addEventListener('click', ()=>setMonitor(true));
+    setMonitor(false); // par défaut OFF
 
+    // ——— Détection (branchée uniquement quand il faut)
+    function attachDetector(){
+      if (detector || !source) return;
+      detector = new PitchDetector(engine, { onPitch });
+      detector.connect(source);
+    }
+    function detachDetector(){
+      if (detector){ detector.destroy(); detector=null; }
+    }
+    function onPitch(evt){
+      // Ne tracer que si live ON ou si on enregistre
+      if (!monitorLive && !recording) return;
+      display.addPoint(evt.timeSec, evt.value, evt.meta);
+    }
+
+    // ——— Enregistrement
     btnRec.addEventListener('click', async ()=>{
       try{
-        if(!pitch){ appendLog('[WARN] Active d\'abord le micro.'); return; }
-        recording=true;
-        btnRec.disabled=true; btnStop.disabled=false;
-        plot.resetTimeline(); plot.startIfIdle();
+        await ensureAudioReady();
+        if (!mic || !mic.isOpen()) { addLog('[WARN] Active d’abord le micro.'); return; }
+        attachDetector();
+        // reset timeline
+        display.reset(engine.currentTime());
+        t0 = engine.currentTime();
+        recording = true;
+        display.setCursor(true);
         startTimer();
-        t0 = performance.now();
-        await pitch.startRecord(); // démarre MediaRecorder interne
-        if(!live) startLive();
-        appendLog('[INFO] Enregistrement en cours…');
-      }catch(e){
-        recording=false; btnRec.disabled=false; btnStop.disabled=true;
-        appendLog('[ERROR] Record: '+(e?.message||e));
-      }
+        addLog('[INFO] Enregistrement en cours…');
+
+        // lancer MediaRecorder via mic
+        await mic.startRecording();
+        btnRec.disabled = true; btnStop.disabled = false;
+      }catch(e){ addLog(`[ERROR] Rec: ${e.message||e}`); }
     });
 
     btnStop.addEventListener('click', async ()=>{
       try{
-        btnStop.disabled=true;
-        await pitch?.stopRecord();
-        recording=false;
+        if (!recording) return;
+        const blob = await mic.stopRecording();
+        recordedBlob = blob;
+        recording = false;
+        display.setCursor(false);
         stopTimer();
-        if(!live && rafId){ cancelAnimationFrame(rafId); rafId=null; }
-        const { webm, wav, mp3 } = await pitch?.getExports() ?? {};
-        // Active boutons si dispos
-        dlWebM.disabled = !webm; dlWav.disabled = !wav; dlMp3.disabled = !mp3;
-        dlWebM.onclick = ()=> webm && downloadBlob(webm.blob, webm.name);
-        dlWav.onclick  = ()=> wav  && downloadBlob(wav.blob,  wav.name);
-        dlMp3.onclick  = ()=> mp3  && downloadBlob(mp3.blob,  mp3.name);
-        btnRec.disabled=false;
-        appendLog('[INFO] Enregistrement terminé.');
-      }catch(e){
-        appendLog('[ERROR] Stop: '+(e?.message||e));
-      }
+        btnRec.disabled = false; btnStop.disabled = true;
+        addLog('[INFO] Enregistrement terminé.');
+      }catch(e){ addLog(`[ERROR] Stop: ${e.message||e}`); }
+    });
+
+    // ——— Exports
+    btnDLWebm.addEventListener('click', ()=>{
+      if (!recordedBlob){ addLog('[WARN] Pas d’enregistrement.'); return; }
+      downloadBlob(recordedBlob, 'prise.webm');
+    });
+    btnDLWav.addEventListener('click', async ()=>{
+      if (!recordedBlob){ addLog('[WARN] Pas d’enregistrement.'); return; }
+      const wav = await mic.exportWav();
+      downloadBlob(wav, 'prise.wav');
+    });
+    btnDLMP3.addEventListener('click', async ()=>{
+      if (!recordedBlob){ addLog('[WARN] Pas d’enregistrement.'); return; }
+      const mp3 = await mic.exportMp3();
+      downloadBlob(mp3, 'prise.mp3');
     });
 
     function downloadBlob(blob, filename){
-      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; a.click();
-      setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename; a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
     }
 
-    // Modes
-    modeCents.addEventListener('click', ()=>setMode('cents'));
-    modeNotes.addEventListener('click', ()=>setMode('notes'));
-    document.querySelectorAll('[data-zoom]').forEach(btn=>{
-      btn.addEventListener('click', ()=> setZoom(btn.dataset.zoom));
-    });
+    addLog('Système de logs prêt.');
   </script>
 </body>
 </html>

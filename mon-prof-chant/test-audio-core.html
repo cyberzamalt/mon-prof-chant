@@ -2,13 +2,12 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <title>Test Audio Core — Pitch (cents/notes) + Timeline (ligne médiane)</title>
+  <title>Test Audio Core — Pitch (cents/notes) + Timeline</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root{
       --bg:#0b1220;--panel:#0e1729;--card:#111a2e;--grid:#1a2642;--text:#e5e7eb;--muted:#9ca3af;
-      --ok:#10b981;--warn:#f59e0b;--err:#ef4444;--accent:#60a5fa;--accent2:#34d399;--axis:#334155;
-      --orange:#f59e0b;--blue:#3b82f6;--green:#22c55e;
+      --ok:#10b981;--warn:#f59e0b;--err:#ef4444;--axis:#334155;--orange:#f59e0b;--blue:#3b82f6;--green:#22c55e;
     }
     *{box-sizing:border-box} html,body{height:100%}
     body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
@@ -19,7 +18,6 @@
       color:var(--text);border-radius:10px;padding:8px 12px;cursor:pointer;font-weight:700}
     .btn[disabled]{opacity:.45;cursor:not-allowed}
     .btn.ok{background:#0e1f14;border-color:#173621;color:#c8facc}
-    .btn.warn{background:#241a08;border-color:#4b320a;color:#ffe4b5}
     .btn.stop{background:#2a0f14;border-color:#4a171f;color:#fecaca}
     .seg{display:inline-flex;border:1px solid #22304f;background:var(--card);border-radius:12px;overflow:hidden}
     .seg button{padding:8px 12px;border:0;background:transparent;color:var(--text);cursor:pointer}
@@ -36,26 +34,26 @@
     .d1{background:var(--blue)} .d2{background:#22c55e} .d3{background:var(--orange)}
     .footerBtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
     .log{background:#0b1020;border:1px solid #1f2a44;border-radius:12px;padding:10px;color:#dbeafe;
-      font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
       font-size:12px;max-height:210px;overflow:auto}
     .badge{display:inline-flex;gap:6px;align-items:center;border:1px solid #22304f;background:#0b1220;padding:4px 8px;border-radius:8px}
     .b-ok{color:#bbf7d0;border-color:#206a44;background:#052216}
     .b-warn{color:#fde68a;border-color:#6b4d11;background:#261a06}
     .right{margin-left:auto}
-    canvas{display:block;width:100%;height:420px;background:#0b1324;border-radius:8px}
+    canvas{display:block;width:100%;height:460px;background:#0b1324;border-radius:8px}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="h1">🎚️ Test Audio Core — Pitch (cents/notes) + Timeline (ligne médiane)</div>
+    <div class="h1">🎚️ Test Audio Core — Pitch (cents/notes) + Timeline</div>
 
     <!-- Barre d’actions -->
     <div class="bar">
       <button id="btnMic" class="btn">Activer micro</button>
 
       <span class="seg" id="segMonitor">
-        <button data-val="off" class="active">Moniteur live</button>
-        <button data-val="on">ON</button>
+        <button data-val="off" class="active">OFF</button>
+        <button data-val="on">Moniteur live ON</button>
       </span>
 
       <div class="seg" id="segRecord">
@@ -84,8 +82,8 @@
 
     <!-- Zone graphique -->
     <div class="canvasWrap">
-      <div class="hint">Astuce : la courbe n’apparaît qu’en <b>Moniteur live ON</b> ou pendant un <b>enregistrement</b>. La ligne verte = médiane (0 cent / note de référence). Le curseur orange (temps) ne bouge que pendant un enregistrement.</div>
-      <canvas id="scope" width="1200" height="420"></canvas>
+      <div class="hint">La courbe bleue = pitch détecté. Ligne verte = 0 cent (médiane). Le curseur orange n’apparaît que pendant un enregistrement.</div>
+      <canvas id="scope" width="1200" height="460"></canvas>
 
       <div class="legend">
         <span><span class="dot d1"></span>Courbe de pitch (continu)</span>
@@ -106,31 +104,25 @@
     <pre id="log" class="log">Système de logs prêt…</pre>
   </div>
 
-  <!-- Détection de pitch : version complète si présente -->
-  <script src="./src/vendor/pitchy.min.js"></script>
-  <!-- Alias de compat pour notre code (utilise PitchyLite) -->
-  <script>
-    if (window.Pitchy && !window.PitchyLite) { window.PitchyLite = window.Pitchy; }
-  </script>
-  <!-- Fallback compact (si tu préfères le garder en secours) -->
+  <!-- Détection locale (YIN compact) -->
   <script src="./src/vendor/pitchy-lite.js"></script>
+
+  <!-- Encodeur MP3 local (si présent, le bouton se dégrise) -->
+  <script src="./src/vendor/lame.min.js"></script>
 
   <!-- Exports locaux -->
   <script src="./src/utils/wav-export.js"></script>
   <script src="./src/utils/mp3-export.js"></script>
 
   <script>
-  /***************  Petit logger ***************/
+  /***************  Logger ***************/
   const logBox = document.getElementById('log');
   const log = (lvl, msg) => {
-    const now = new Date();
-    const h = now.getHours().toString().padStart(2,'0');
-    const m = now.getMinutes().toString().padStart(2,'0');
-    logBox.textContent += `\n[${h}:${m}] [${lvl}] ${msg}`;
-    logBox.scrollTop = logBox.scrollHeight;
+    const now = new Date(); const h = String(now.getHours()).padStart(2,'0'); const m = String(now.getMinutes()).padStart(2,'0');
+    logBox.textContent += `\n[${h}:${m}] [${lvl}] ${msg}`; logBox.scrollTop = logBox.scrollHeight;
   };
 
-  /***************  Réfs UI ***************/
+  /***************  UI refs ***************/
   const btnMic   = document.getElementById('btnMic');
   const btnStart = document.getElementById('btnStart');
   const btnStop  = document.getElementById('btnStop');
@@ -149,290 +141,290 @@
   const offsetEl      = document.getElementById('offsetCents');
 
   /***************  État ***************/
-  let audioCtx = null;
-  let micStream = null;
-  let analyser = null;
-  let processor = null;
-  let mediaRecorder = null;
-  let chunks = [];
-  let lastBlob = null;
-  let ticking = false;
-  let monitorLive = false;
-  let zoomY = 1;  // 1 / 2 / 4
-  let mode = 'cents'; // 'cents' | 'notes'
-  let medianNoteHz = 440 * Math.pow(2, (9 - 9)); // placeholder
-  let recStart = 0;
-  let rafId = 0;
+  let audioCtx = null, micStream = null, analyser = null;
+  let mediaRecorder = null, chunks = [], lastBlob = null;
+  let monitorLive = false, zoomY = 1, mode = 'cents';
+  let rafId = 0, running = false; // boucle de rendu
+  let liveStart = 0, recStart = 0;
+  const MAX_SEC = 120; // fenêtre visible (2 min)
+  const PAD_LEFT = 60, PAD_RIGHT = 20, PAD_TOP = 20, PAD_BOTTOM = 36;
+
+  // buffer circulaire des points (temps,cents)
+  const points = []; // {t,c}
+  function resetTimeline() { points.length = 0; }
 
   // Pitch lib dispo ?
   const hasPitchy = !!window.PitchyLite;
-  if (hasPitchy) {
-    pitchyStatus.innerHTML = 'Pitchy (détection) : <b class="b-ok">chargé</b>';
-    pitchyStatus.className = 'badge b-ok';
-  } else {
-    log('WARN','Pitchy non chargé (lib locale manquante) → pas de courbe.');
+  if (hasPitchy) { pitchyStatus.innerHTML = 'Pitchy (détection) : <b>chargé</b>'; pitchyStatus.className = 'badge b-ok'; }
+  else { log('WARN','Pitchy non chargé → pas de courbe.'); }
+
+  // MP3 dispo ?
+  const hasLame = !!(window.MP3Export && window.MP3Export.isReady && window.MP3Export.isReady());
+  if (hasLame) { mp3Status.innerHTML = 'MP3 : <b>encodeur prêt</b>'; mp3Status.className = 'badge b-ok'; btnMP3.disabled = false; }
+
+  /***************  Axes & mise à l’échelle ***************/
+  function yFromCents(c){
+    const vis = 300/zoomY; // -vis..+vis
+    const norm = c / (vis||1);
+    const h = scope.height - PAD_TOP - PAD_BOTTOM;
+    return PAD_TOP + (h/2) - norm*(h/2);
+  }
+  function xFromSeconds(t){
+    const w = scope.width - PAD_LEFT - PAD_RIGHT;
+    const clamped = Math.max(0, Math.min(t, MAX_SEC));
+    return PAD_LEFT + (w * (clamped / MAX_SEC));
   }
 
-  // Encodeur MP3 dispo ?
-  const hasLame = !!window.MP3Export && window.MP3Export.isReady();
-  if (hasLame) {
-    mp3Status.innerHTML = 'MP3 : <b class="b-ok">encodeur prêt</b>';
-    mp3Status.className = 'badge b-ok';
-    btnMP3.disabled = false;
-  }
+  function drawAxes(){
+    // fond
+    ctx.fillStyle = '#0b1324'; ctx.fillRect(0,0,scope.width,scope.height);
 
-  /***************  Canvas helpers ***************/
-  function clearCanvas() {
-    ctx.fillStyle = '#0b1324';
-    ctx.fillRect(0,0,scope.width,scope.height);
-    // grille horizontale + étiquettes
-    const midY = scope.height/2;
-    const maxCents = 300/zoomY; // -300..+300 centrés
-    const step = 100/zoomY;     // graduations
-    ctx.strokeStyle = '#142039';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let c=-maxCents; c<=maxCents; c+=step) {
-      const y = mapCentsToY(c);
-      ctx.moveTo(0, y); ctx.lineTo(scope.width, y);
+    // zone tracé
+    ctx.strokeStyle = '#142039'; ctx.lineWidth = 1;
+    ctx.strokeRect(PAD_LEFT, PAD_TOP, scope.width-PAD_LEFT-PAD_RIGHT, scope.height-PAD_TOP-PAD_BOTTOM);
+
+    // lignes horizontales (cents)
+    ctx.strokeStyle = '#142039'; ctx.beginPath();
+    const step = 100/zoomY, max = 300/zoomY;
+    for (let c=-max; c<=max; c+=step){
+      const y = Math.round(yFromCents(c)) + .5;
+      ctx.moveTo(PAD_LEFT, y); ctx.lineTo(scope.width-PAD_RIGHT, y);
     }
     ctx.stroke();
 
-    // médiane (0 cent)
-    ctx.strokeStyle = '#22c55e';
-    ctx.beginPath();
-    ctx.moveTo(0, midY); ctx.lineTo(scope.width, midY);
-    ctx.stroke();
+    // médiane 0 cent
+    ctx.strokeStyle = '#22c55e'; ctx.beginPath();
+    const y0 = Math.round(yFromCents(0)) + .5;
+    ctx.moveTo(PAD_LEFT, y0); ctx.lineTo(scope.width-PAD_RIGHT, y0); ctx.stroke();
 
-    // labels “Très grave / Grave / Aigu / Très aigu”
+    // labels verticaux (cents à gauche) + libellés à droite
+    ctx.fillStyle = '#9ca3af'; ctx.font = '12px system-ui';
+    for (let c=-max; c<=max; c+=step){
+      const y = yFromCents(c)+4;
+      const lbl = (c>0? '+'+c:c)+' c';
+      ctx.fillText(lbl, 8, y);
+    }
+    ctx.fillText('Très aigu',  scope.width-84, yFromCents( 250/zoomY)+4);
+    ctx.fillText('Aigu',       scope.width-84, yFromCents(  50/zoomY)+4);
+    ctx.fillText('Grave',      scope.width-84, yFromCents( -50/zoomY)+4);
+    ctx.fillText('Très grave', scope.width-84, yFromCents(-250/zoomY)+4);
+
+    // axe temps (graduations bas)
     ctx.fillStyle = '#9ca3af';
-    ctx.font = '12px system-ui';
-    ctx.fillText('Très grave', scope.width-80, mapCentsToY(+250/zoomY));
-    ctx.fillText('Grave',      scope.width-80, mapCentsToY(+50/zoomY));
-    ctx.fillText('Aigu',       scope.width-80, mapCentsToY(-50/zoomY));
-    ctx.fillText('Très aigu',  scope.width-80, mapCentsToY(-250/zoomY));
-  }
-  function mapCentsToY(c){
-    const max = 300; // plage totale visuelle
-    const norm = c / 300;
-    return scope.height/2 - norm*scope.height/2;
+    const secStep = 10; // toutes les 10s
+    for (let s=0; s<=MAX_SEC; s+=secStep){
+      const x = Math.round(xFromSeconds(s)) + .5;
+      ctx.strokeStyle = '#1a2642';
+      ctx.beginPath(); ctx.moveTo(x, scope.height-PAD_BOTTOM); ctx.lineTo(x, scope.height-PAD_BOTTOM+6); ctx.stroke();
+      ctx.fillText(String(s)+'s', x-10, scope.height-8);
+    }
   }
 
-  function drawCursorTime() {
+  function drawCursor(){
     if (!recStart) return;
-    const elapsed = (audioCtx.currentTime - recStart);
-    const ratio = Math.min(elapsed / 120, 1); // 120s échelle temporelle fixe de la démo
-    const x = 40 + (scope.width-60) * ratio;
+    const t = audioCtx.currentTime - recStart;
+    const x = Math.round(xFromSeconds(t)) + .5;
     ctx.strokeStyle = '#f59e0b';
-    ctx.beginPath();
-    ctx.moveTo(x, 10); ctx.lineTo(x, scope.height-10);
+    ctx.beginPath(); ctx.moveTo(x, PAD_TOP); ctx.lineTo(x, scope.height-PAD_BOTTOM); ctx.stroke();
+  }
+
+  function drawCurve(){
+    if (!points.length) return;
+    ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 1.5; ctx.beginPath();
+    for (let i=0;i<points.length;i++){
+      const p = points[i];
+      const x = xFromSeconds(p.t);
+      const y = yFromCents(p.c);
+      if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
     ctx.stroke();
+  }
+
+  function render(){
+    drawAxes();
+    drawCurve();
+    drawCursor();
   }
 
   /***************  Audio ***************/
-  async function ensureAudio() {
+  async function ensureAudio(){
     if (audioCtx) return;
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)({sampleRate: 48000, latencyHint:'interactive'});
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
-    processor = audioCtx.createScriptProcessor(2048, 1, 1);
+    const AC = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new AC({ sampleRate: 48000, latencyHint:'interactive' });
+    analyser = audioCtx.createAnalyser(); analyser.fftSize = 2048;
     log('INFO','AudioEngine prêt');
   }
-
-  async function activateMic() {
+  async function activateMic(){
     await ensureAudio();
     micStream = await navigator.mediaDevices.getUserMedia({audio:true, video:false});
     const src = audioCtx.createMediaStreamSource(micStream);
     src.connect(analyser);
-    processor.connect(audioCtx.destination);
     log('INFO','Micro activé');
   }
 
-  function startMonitor() {
-    if (!hasPitchy || !analyser) return;
-    if (ticking) return;
-    ticking = true;
+  /***************  Détection & boucle ***************/
+  function startLoop(){
+    if (running) return;
+    running = true;
+    const det = hasPitchy ? new PitchyLite(audioCtx.sampleRate) : null;
     const buf = new Float32Array(analyser.fftSize);
-    const det = new PitchyLite(audioCtx.sampleRate);
 
-    const tick = () => {
-      if (!ticking) return;
-      clearCanvas();
+    const baseStart = recStart || liveStart || 0;
 
-      if (monitorLive || mediaRecorder?.state === 'recording') {
+    const tick = ()=>{
+      if (!running){ cancelAnimationFrame(rafId); return; }
+
+      drawAxes();
+
+      let tNow = 0;
+      if (recStart) tNow = audioCtx.currentTime - recStart;
+      else if (monitorLive && liveStart) tNow = audioCtx.currentTime - liveStart;
+
+      if (det && (monitorLive || recStart)){
         analyser.getFloatTimeDomainData(buf);
-        const hz = det.detect(buf); // null si rien
-        if (hz) {
-          // convertir en cents vs note médiane (première note stable après rec start)
-          const cents = hzToCents(hz, medianNoteHz);
-          drawPitchPoint(cents);
-          if (mode === 'notes') {
-            currentNoteEl.textContent = hzToNoteName(hz);
-            offsetEl.textContent = ''; // pas d’offset en mode notes
-          } else {
-            currentNoteEl.textContent = hzToNoteName(medianNoteHz);
-            offsetEl.textContent = `(${Math.round(cents)} c)`;
-          }
+        const hz = det.detect(buf);
+        if (hz){
+          const cents = hzToCents(hz, 440); // ref A4 (simple pour test)
+          // push point dans fenêtre [0..MAX_SEC]
+          const t = tNow; // temps local (live ou rec)
+          points.push({t: Math.max(0, Math.min(t, MAX_SEC)), c: cents});
+          // supprime les points hors fenêtre (glissant)
+          while (points.length && points[0].t < tNow - MAX_SEC) points.shift();
+
+          // UI note/cents
+          if (mode==='notes'){ currentNoteEl.textContent = hzToNoteName(hz); offsetEl.textContent = ''; }
+          else { currentNoteEl.textContent = 'A4'; offsetEl.textContent = `(${Math.round(cents)} c)`; }
         }
-        drawCursorTime();
-      } else {
-        clearCanvas();
       }
+
+      drawCurve();
+      drawCursor();
+
       rafId = requestAnimationFrame(tick);
     };
     tick();
   }
-  function stopMonitor() { ticking = false; cancelAnimationFrame(rafId); clearCanvas(); }
-
-  function drawPitchPoint(cents) {
-    // On trace un point (pas une barre), qui se déplace vers la droite avec le temps.
-    const t = recStart ? (audioCtx.currentTime - recStart) : 0; // s
-    const maxTime = 120; // 2 min d’échelle
-    const leftPad = 40, rightPad = 20;
-    const x = leftPad + (scope.width - leftPad - rightPad) * Math.min(t / maxTime, 1);
-    const y = mapCentsToY(cents/zoomY);
-
-    ctx.fillStyle = '#3b82f6';
-    ctx.beginPath();
-    ctx.arc(x, y, 2.5, 0, Math.PI*2);
-    ctx.fill();
-  }
-
-  /***************  Pitch helpers ***************/
-  function hzToNoteNumber(hz){ return 69 + 12 * Math.log2(hz/440); }
-  function hzToNoteName(hz){
-    const n = Math.round(hzToNoteNumber(hz));
-    const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-    const name = names[(n+1200)%12];
-    const oct = Math.floor(n/12) - 1;
-    return `${name}${oct}`;
-  }
-  function centsBetween(freq1, freq2){ return 1200 * Math.log2(freq1/freq2); }
-  function hzToCents(hz, refHz){ return centsBetween(hz, refHz); }
+  function stopLoop(){ running = false; cancelAnimationFrame(rafId); render(); }
 
   /***************  Recorder ***************/
-  function startRecording() {
-    if (!micStream) { log('WARN','Active d’abord le micro.'); return; }
-    if (!MediaRecorder) { log('ERROR','MediaRecorder non supporté.'); return; }
-    chunks = []; lastBlob = null;
-    mediaRecorder = new MediaRecorder(micStream, {mimeType: 'audio/webm;codecs=opus'});
-    mediaRecorder.ondataavailable = e => { if (e.data && e.data.size>0) chunks.push(e.data); };
-    mediaRecorder.onstop = () => {
-      if (chunks.length) {
-        lastBlob = new Blob(chunks, {type: 'audio/webm'});
-        log('INFO','Enregistrement terminé.');
-      } else {
-        lastBlob = null;
-        log('WARN','Aucun chunk capturé. (Permissions/restrictions ?)');
-      }
-      recStart = 0;
-      updateTimer(0);
-      drawCursorTime();
-    };
-    mediaRecorder.start(100);
-    recStart = audioCtx.currentTime;
-    log('INFO','Enregistrement en cours…');
-    tickTimer();
-  }
-  function stopRecording() {
-    if (mediaRecorder && mediaRecorder.state === 'recording') {
-      mediaRecorder.stop();
-    }
-  }
-
-  /***************  Timer ***************/
   let timerInt = null;
   function updateTimer(s){
-    const mm = Math.floor(s/60).toString().padStart(2,'0');
-    const ss = Math.floor(s%60).toString().padStart(2,'0');
+    const mm = String(Math.floor(s/60)).padStart(2,'0');
+    const ss = String(Math.floor(s%60)).padStart(2,'0');
     timerEl.textContent = `${mm}:${ss}`;
   }
   function tickTimer(){
     clearInterval(timerInt);
-    timerInt = setInterval(()=>{
-      if (!recStart) return;
-      updateTimer(audioCtx.currentTime - recStart);
-    }, 250);
+    timerInt = setInterval(()=>{ if (recStart) updateTimer(audioCtx.currentTime - recStart); }, 200);
   }
+
+  function startRecording(){
+    if (!micStream) return log('WARN','Active d’abord le micro.');
+    if (!MediaRecorder) return log('ERROR','MediaRecorder non supporté.');
+
+    chunks = []; lastBlob = null; resetTimeline();
+    mediaRecorder = new MediaRecorder(micStream, {mimeType:'audio/webm;codecs=opus'});
+    mediaRecorder.ondataavailable = e => { if (e.data && e.data.size>0) chunks.push(e.data); };
+    mediaRecorder.onstop = ()=>{
+      if (chunks.length){ lastBlob = new Blob(chunks,{type:'audio/webm'}); log('INFO','Enregistrement terminé.'); }
+      else { lastBlob = null; log('WARN','Aucun chunk capturé.'); }
+      recStart = 0; updateTimer(0); render();
+    };
+
+    recStart = audioCtx.currentTime;
+    if (!running) startLoop(); // assure la courbe même si live OFF
+    mediaRecorder.start(100);
+    log('INFO','Enregistrement en cours…');
+    tickTimer();
+  }
+  function stopRecording(){
+    if (mediaRecorder && mediaRecorder.state==='recording') mediaRecorder.stop();
+  }
+
+  /***************  Helpers pitch ***************/
+  function hzToNoteNumber(hz){ return 69 + 12*Math.log2(hz/440); }
+  function hzToNoteName(hz){
+    const n = Math.round(hzToNoteNumber(hz));
+    const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    const name = names[(n+1200)%12]; const oct = Math.floor(n/12)-1; return `${name}${oct}`;
+  }
+  function centsBetween(f1,f2){ return 1200*Math.log2(f1/f2); }
+  function hzToCents(hz, refHz){ return centsBetween(hz, refHz); }
 
   /***************  Actions UI ***************/
   // Micro
   btnMic.addEventListener('click', async ()=>{
-    try {
-      await activateMic();
-      btnMic.classList.add('ok');
-      if (monitorLive) startMonitor(); else { clearCanvas(); }
-    } catch(e){ log('ERROR', 'Micro : '+(e.message||e)); }
+    try{
+      await activateMic(); btnMic.classList.add('ok');
+      render(); // axes visibles dès le départ
+      if (monitorLive && !running){ liveStart = audioCtx.currentTime; startLoop(); }
+    }catch(e){ log('ERROR','Micro : '+(e.message||e)); }
   });
 
-  // Moniteur ON/OFF
+  // Moniteur live
   segMonitor.addEventListener('click', e=>{
     if (e.target.tagName!=='BUTTON') return;
-    const val = e.target.dataset.val;
-    segMonitor.querySelectorAll('button').forEach(b=>b.classList.toggle('active', b===e.target));
-    monitorLive = (val==='on');
-    log('INFO', `Moniteur live ${monitorLive?'ON':'OFF'}`);
-    if (monitorLive) startMonitor(); else stopMonitor();
+    segMonitor.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+    e.target.classList.add('active');
+    monitorLive = (e.target.dataset.val==='on');
+    log('INFO','Moniteur live '+(monitorLive?'ON':'OFF'));
+
+    if (monitorLive){
+      liveStart = audioCtx?.currentTime || 0;
+      if (!running) startLoop();
+    }else{
+      if (!recStart) stopLoop(); // si pas d’enregistrement, on peut arrêter la boucle
+    }
   });
 
   // Zoom vertical
   segZoom.addEventListener('click', e=>{
     if (e.target.tagName!=='BUTTON') return;
+    segZoom.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+    e.target.classList.add('active');
     zoomY = Number(e.target.dataset.z||'1');
-    segZoom.querySelectorAll('button').forEach(b=>b.classList.toggle('active', b===e.target));
-    clearCanvas();
+    render();
   });
 
-  // Mode d’affichage
+  // Mode
   modeBtns.forEach(b=>b.addEventListener('click', ()=>{
-    modeBtns.forEach(x=>x.classList.remove('active'));
-    b.classList.add('active');
-    mode = b.dataset.mode;
-    clearCanvas();
+    modeBtns.forEach(x=>x.classList.remove('active')); b.classList.add('active');
+    mode = b.dataset.mode; render();
   }));
 
   // Start / Stop
-  btnStart.addEventListener('click', ()=>{
-    startRecording();
-    startMonitor(); // la courbe peut apparaître pendant l’enregistrement
-  });
-  btnStop.addEventListener('click', ()=>{
-    stopRecording();
-  });
+  btnStart.addEventListener('click', ()=>{ startRecording(); });
+  btnStop.addEventListener('click',  ()=>{ stopRecording(); });
 
   // Exports
   btnWebM.addEventListener('click', ()=>{
-    if (!lastBlob) return log('WARN','Rien à exporter (WebM). Lance un enregistrement, puis Stop.');
-    downloadBlob(lastBlob, 'take.webm');
+    if (!lastBlob) return log('WARN','Rien à exporter (WebM).');
+    downloadBlob(lastBlob,'take.webm');
   });
   btnWAV.addEventListener('click', async ()=>{
     if (!lastBlob) return log('WARN','Rien à exporter (WAV).');
-    const wav = await WAVExport.fromWebM(lastBlob);
-    if (!wav) return log('ERROR','Conversion WAV impossible.');
-    downloadBlob(wav, 'take.wav');
+    try{
+      const wav = await WAVExport.fromWebM(lastBlob); downloadBlob(wav,'take.wav');
+    }catch(err){ log('ERROR','WAV: '+(err.message||err)); }
   });
   btnMP3.addEventListener('click', async ()=>{
     if (!lastBlob) return log('WARN','Rien à exporter (MP3).');
     if (!hasLame) return log('WARN','Encodeur MP3 absent (/src/vendor/lame.min.js).');
-    const wav = await WAVExport.fromWebM(lastBlob);
-    if (!wav) return log('ERROR','Conversion WAV impossible.');
-    const mp3 = await MP3Export.fromWAV(wav);
-    if (!mp3) return log('ERROR','Conversion MP3 impossible.');
-    downloadBlob(mp3, 'take.mp3');
+    try{
+      const wav = await WAVExport.fromWebM(lastBlob);
+      const mp3 = await MP3Export.fromWAV(wav);
+      downloadBlob(mp3,'take.mp3');
+    }catch(err){ log('ERROR','MP3: '+(err.message||err)); }
   });
 
-  function downloadBlob(b, name){
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(b);
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  function downloadBlob(b,name){
+    const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name; document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },0);
   }
 
-  // Au chargement
-  clearCanvas();
-  log('INFO', 'Moniteur live OFF par défaut.');
+  // Démarrage
+  render();
+  log('INFO','Moniteur live OFF par défaut.');
   </script>
 </body>
 </html>

@@ -1,126 +1,73 @@
-<script>
-/*!
- * WAVExport – WebM → WAV (PCM 16-bit LE)
- * Expose: window.WAVExport.fromWebM(blob) -> Promise<Blob 'audio/wav'>
- */
-(function () {
-  const WAVExport = {
-    /**
-     * Convertit un Blob WebM Opus en WAV PCM 16-bit LE.
-     * @param {Blob} webmBlob
-     * @returns {Promise<Blob>} WAV blob
-     */
-    async fromWebM(webmBlob) {
-      if (!(webmBlob instanceof Blob)) throw new Error('fromWebM: blob requis');
+// WAVExport — convertit un Blob WebM/Opus en WAV PCM 16-bit
+// Usage: const wavBlob = await WAVExport.fromWebM(webmBlob);
 
-      // 1) Lire en ArrayBuffer
-      const arrayBuf = await webmBlob.arrayBuffer();
+const WAVExport = (() => {
+  async function decodeBlobToBuffer(blob) {
+    const array = await blob.arrayBuffer();
+    const ctx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 1, 48000);
+    // On ne peut pas utiliser OfflineAudioContext directement pour decodeAudioData sur tous les navigateurs,
+    // on crée un AudioContext classique quand c'est nécessaire :
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = await ac.decodeAudioData(array.slice(0));
+    ac.close();
+    return buf;
+  }
 
-      // 2) Décoder en AudioBuffer via AudioContext (pas d’Offline nécessaire ici)
-      const AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) throw new Error('AudioContext non disponible');
-      const ac = new AC({ sampleRate: 48000 });
-      let audioBuffer;
-      try {
-        audioBuffer = await ac.decodeAudioData(arrayBuf.slice(0)); // slice() pour certains UA
-      } catch (err) {
-        ac.close?.();
-        throw new Error('Échec decodeAudioData: ' + (err?.message || err));
-      }
-      ac.close?.();
-
-      // 3) Encoder en WAV PCM 16-bit
-      const wavBuf = encodeWavFromAudioBuffer(audioBuffer);
-
-      return new Blob([wavBuf], { type: 'audio/wav' });
-    }
-  };
-
-  // ---- Helpers ----
-
-  function encodeWavFromAudioBuffer(audioBuffer) {
-    const numChannels = audioBuffer.numberOfChannels;
-    const sampleRate = audioBuffer.sampleRate;
-    const numFrames  = audioBuffer.length;
-
-    // Récupérer données par canal en Float32 [-1..+1]
-    const channels = [];
-    for (let ch = 0; ch < numChannels; ch++) {
-      channels.push(audioBuffer.getChannelData(ch));
-    }
-
-    // Interleave (si stéréo) ou direct (mono)
-    let interleaved;
-    if (numChannels === 2) {
-      interleaved = interleave(channels[0], channels[1]);
-    } else {
-      interleaved = channels[0];
-    }
-
-    // Float32 -> PCM16
-    const pcm16 = floatTo16BitPCM(interleaved);
-
-    // Construire header WAV (RIFF)
+  function encodeWAVPCM16(interleaved, sampleRate) {
     const bytesPerSample = 2;
-    const blockAlign = numChannels * bytesPerSample;
-    const byteRate   = sampleRate * blockAlign;
-    const dataSize   = pcm16.byteLength;
-    const buffer     = new ArrayBuffer(44 + dataSize);
-    const view       = new DataView(buffer);
+    const blockAlign = 1 * bytesPerSample;
+    const buffer = new ArrayBuffer(44 + interleaved.length * bytesPerSample);
+    const view = new DataView(buffer);
 
-    // RIFF chunk descriptor
-    writeString(view, 0, 'RIFF');
-    view.setUint32(4, 36 + dataSize, true);
-    writeString(view, 8, 'WAVE');
+    function writeString(off, s) { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); }
 
-    // fmt sub-chunk
-    writeString(view, 12, 'fmt ');
-    view.setUint32(16, 16, true);        // Subchunk1Size (16 for PCM)
-    view.setUint16(20, 1, true);         // AudioFormat (1 = PCM)
-    view.setUint16(22, numChannels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, byteRate, true);
-    view.setUint16(32, blockAlign, true);
-    view.setUint16(34, 16, true);        // BitsPerSample
+    // RIFF header
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + interleaved.length * bytesPerSample, true);
+    writeString(8, 'WAVE');
 
-    // data sub-chunk
-    writeString(view, 36, 'data');
-    view.setUint32(40, dataSize, true);
+    // fmt  subchunk
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);           // Subchunk1Size
+    view.setUint16(20, 1, true);            // PCM
+    view.setUint16(22, 1, true);            // channels
+    view.setUint32(24, sampleRate, true);   // sample rate
+    view.setUint32(28, sampleRate * blockAlign, true); // byte rate
+    view.setUint16(32, blockAlign, true);   // block align
+    view.setUint16(34, 16, true);           // bits per sample
 
-    // PCM data
-    new Uint8Array(buffer, 44).set(new Uint8Array(pcm16.buffer));
+    // data subchunk
+    writeString(36, 'data');
+    view.setUint32(40, interleaved.length * bytesPerSample, true);
 
-    return buffer;
+    // samples
+    let offset = 44;
+    for (let i = 0; i < interleaved.length; i++, offset += 2) {
+      let s = Math.max(-1, Math.min(1, interleaved[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+    return new Blob([view], { type: 'audio/wav' });
   }
 
-  function interleave(left, right) {
-    const len = left.length + right.length;
-    const out = new Float32Array(len);
-    let i = 0, j = 0;
-    while (i < len) {
-      out[i++] = left[j];
-      out[i++] = right[j];
-      j++;
+  async function fromWebM(webmBlob) {
+    try {
+      const buf = await decodeBlobToBuffer(webmBlob);
+      const ch = buf.numberOfChannels > 1 ? mixToMono(buf) : buf.getChannelData(0);
+      return encodeWAVPCM16(ch, buf.sampleRate);
+    } catch (e) {
+      console.error('[WAVExport] fromWebM error', e);
+      return null;
+    }
+  }
+
+  function mixToMono(audioBuffer) {
+    const out = new Float32Array(audioBuffer.length);
+    for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
+      const data = audioBuffer.getChannelData(c);
+      for (let i = 0; i < data.length; i++) out[i] += data[i] / audioBuffer.numberOfChannels;
     }
     return out;
   }
 
-  function floatTo16BitPCM(float32) {
-    const out = new Int16Array(float32.length);
-    for (let i = 0; i < float32.length; i++) {
-      let s = Math.max(-1, Math.min(1, float32[i]));
-      out[i] = (s < 0 ? s * 0x8000 : s * 0x7FFF) | 0;
-    }
-    return out;
-  }
-
-  function writeString(view, offset, str) {
-    for (let i = 0; i < str.length; i++) {
-      view.setUint8(offset + i, str.charCodeAt(i));
-    }
-  }
-
-  // Expose
-  window.WAVExport = WAVExport;
+  return { fromWebM };
 })();
-</script>

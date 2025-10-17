@@ -151,7 +151,6 @@ body {
   padding: 4px;
   background: #0b1324;
   margin: 8px 0;
-  position: relative;
 }
 
 canvas {
@@ -205,12 +204,6 @@ canvas {
   background: #261a06;
 }
 
-.badge.err {
-  color: #fecaca;
-  border-color: #7f1d1d;
-  background: #2a0f14;
-}
-
 .hint {
   color: var(--muted);
   font-size: 12px;
@@ -258,8 +251,8 @@ input[type="file"] {
 </head>
 <body>
 
-<!-- PITCHY CDN -->
-<script src="https://cdn.jsdelivr.net/npm/pitchy@4.1.0/dist/index.min.js"></script>
+<!-- TONE.JS CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 
 <div class="wrap">
   <div class="h1">🎵 Test Audio Core — Enregistrement + Détection Pitch</div>
@@ -279,7 +272,7 @@ input[type="file"] {
       <button id="btnMonOn" class="btn">Moniteur ON</button>
     </div>
 
-    <span class="right badge warn" id="pitchyStatus">Pitchy: chargement...</span>
+    <span class="right badge warn" id="pitchyStatus">Détecteur: chargement...</span>
   </div>
 
   <div class="cols">
@@ -341,11 +334,10 @@ const log = (level, msg) => {
 
 log('INFO', 'Système démarré');
 
-// Vérifier que Pitchy est chargé
-if (typeof Pitchy !== 'undefined') {
-  log('INFO', 'Pitchy 4.1.0 disponible (CDN)');
+if (typeof Tone !== 'undefined') {
+  log('INFO', 'Tone.js disponible');
 } else {
-  log('WARN', 'Pitchy pas encore chargé...');
+  log('WARN', 'Tone.js pas chargé');
 }
 
 /* ==================== DOM ==================== */
@@ -405,7 +397,6 @@ function drawCanvasRec() {
   ctxRec.fillStyle = '#0b1324';
   ctxRec.fillRect(0, 0, w, h);
 
-  // Grille
   ctxRec.strokeStyle = '#1a2642';
   ctxRec.lineWidth = 1;
   for (let y = 0; y <= h; y += 40) {
@@ -415,7 +406,6 @@ function drawCanvasRec() {
     ctxRec.stroke();
   }
 
-  // Axes
   ctxRec.strokeStyle = '#334155';
   ctxRec.lineWidth = 2;
   ctxRec.beginPath();
@@ -427,7 +417,6 @@ function drawCanvasRec() {
   ctxRec.lineTo(w, h - 40);
   ctxRec.stroke();
 
-  // Ligne médiane (0 cents)
   ctxRec.strokeStyle = '#22c55e';
   ctxRec.lineWidth = 2;
   ctxRec.beginPath();
@@ -435,7 +424,6 @@ function drawCanvasRec() {
   ctxRec.lineTo(w, h / 2);
   ctxRec.stroke();
 
-  // Labels gauche
   ctxRec.fillStyle = '#9ca3af';
   ctxRec.font = 'bold 11px monospace';
   ctxRec.textAlign = 'right';
@@ -445,13 +433,11 @@ function drawCanvasRec() {
   ctxRec.fillText('Aigu', 55, h / 2 + 80);
   ctxRec.fillText('Très aigu', 55, h - 10);
 
-  // Labels bas
   ctxRec.textAlign = 'center';
   ctxRec.fillText('0s', 60, h - 20);
   ctxRec.fillText('60s', (w + 60) / 2, h - 20);
   ctxRec.fillText('120s', w, h - 20);
 
-  // Graduations
   ctxRec.strokeStyle = '#1a2642';
   ctxRec.lineWidth = 1;
   for (let cents = -300; cents <= 300; cents += 100) {
@@ -551,14 +537,14 @@ async function activateMic() {
 function initDetector() {
   if (typeof PitchyLite === 'undefined') {
     log('ERROR', 'PitchyLite non disponible');
-    pitchyStatus.textContent = 'PitchyLite: ERREUR';
+    pitchyStatus.textContent = 'Détecteur: ERREUR';
     pitchyStatus.className = 'badge err';
     return false;
   }
 
   detector = new PitchyLite(audioCtx.sampleRate);
   log('INFO', 'Détecteur pitch initialisé');
-  pitchyStatus.textContent = 'Pitchy: OK';
+  pitchyStatus.textContent = 'Détecteur: OK';
   pitchyStatus.className = 'badge ok';
   return true;
 }
@@ -641,7 +627,7 @@ function startMonitor() {
     analyser.getFloatTimeDomainData(buf);
     const hz = detector.detect(buf);
 
-    if (hz) {
+    if (hz && hz > 0) {
       recordDetectionCount++;
       const cents = hzToCents(hz, 440);
       const elapsed = audioCtx.currentTime - recStart;
@@ -650,7 +636,6 @@ function startMonitor() {
 
       recordedPitch.push({ t: elapsed, hz, cents, x, y });
 
-      // Tracer courbe
       if (recordedPitch.length > 1) {
         const prev = recordedPitch[recordedPitch.length - 2];
         ctxRec.strokeStyle = '#3b82f6';
@@ -661,7 +646,6 @@ function startMonitor() {
         ctxRec.stroke();
       }
 
-      // Point
       ctxRec.fillStyle = '#3b82f6';
       ctxRec.beginPath();
       ctxRec.arc(x, y, 2.5, 0, Math.PI * 2);
@@ -769,7 +753,7 @@ fileUploadRef.addEventListener('change', async (e) => {
     refDetectionCount = 0;
     refData.pitch = extractPitch(ch, audio.sampleRate);
     drawReferenceData();
-    log('INFO', `Référence chargée: ${file.name} (${audio.duration.toFixed(1)}s)`);
+    log('INFO', `Référence chargée: ${file.name} (${audio.duration.toFixed(1)}s, ${refData.pitch.length} points)`);
   } catch (err) {
     log('ERROR', 'Upload ref: ' + err.message);
   }
@@ -795,7 +779,7 @@ function extractPitch(samples, sr) {
   for (let i = 0; i + win <= samples.length; i += hop) {
     const slice = samples.subarray(i, i + win);
     const hz = detector.detect(slice);
-    if (hz) {
+    if (hz && hz > 0) {
       detectionCount++;
       const t = i / sr;
       const cents = hzToCents(hz, 440);
@@ -840,7 +824,6 @@ function drawReferenceData() {
 
   debugRef.textContent = `Détections: ${refDetectionCount} | Points tracés: ${refData.pitch.length}`;
 
-  // Stats
   if (refData.pitch.length > 0) {
     const devs = refData.pitch.map(p => Math.abs(p.cents));
     const avg = devs.reduce((a, b) => a + b, 0) / devs.length;

@@ -148,9 +148,10 @@ body {
 .canvasWrap {
   border: 1px solid #1f2a44;
   border-radius: 8px;
-  padding: 8px;
+  padding: 4px;
   background: #0b1324;
   margin: 8px 0;
+  position: relative;
 }
 
 canvas {
@@ -158,7 +159,6 @@ canvas {
   width: 100%;
   height: auto;
   background: #0b1324;
-  border-radius: 6px;
 }
 
 .controls {
@@ -246,7 +246,6 @@ input[type="url"] {
 <div class="wrap">
   <div class="h1">🎵 Test Audio Core — Enregistrement + Détection Pitch</div>
 
-  <!-- ACTIONS PRINCIPALES -->
   <div class="bar">
     <button id="btnMic" class="btn">🎤 Activer micro</button>
 
@@ -265,14 +264,12 @@ input[type="url"] {
     <span class="right badge warn" id="pitchyStatus">PitchyLite: chargement...</span>
   </div>
 
-  <!-- DEUX COLONNES : ENREGISTREMENT + RÉFÉRENCE -->
   <div class="cols">
-    <!-- COLONNE 1 : TA PRISE -->
     <div class="panel">
       <p class="h2">🎙️ Ta prise (micro)</p>
-      <div class="hint">Courbe bleue = ton pitch. Ligne verte = référence (440 Hz).</div>
+      <div class="hint">Courbe bleue = ton pitch. Ligne verte = 0 cent (440 Hz).</div>
       <div class="canvasWrap">
-        <canvas id="canvasRec" width="500" height="280"></canvas>
+        <canvas id="canvasRec" width="600" height="320"></canvas>
       </div>
       <div class="controls">
         <button id="btnDownWebM" class="btn">⬇️ WebM</button>
@@ -283,12 +280,11 @@ input[type="url"] {
       </div>
     </div>
 
-    <!-- COLONNE 2 : RÉFÉRENCE -->
     <div class="panel">
       <p class="h2">🎼 Référence (comparaison)</p>
       <div class="hint">Charge un MP3/WAV local pour comparer ta courbe.</div>
       <div class="canvasWrap">
-        <canvas id="canvasRef" width="500" height="280"></canvas>
+        <canvas id="canvasRef" width="600" height="320"></canvas>
       </div>
       <div class="controls">
         <input type="file" id="fileUploadRef" accept="audio/*" class="btn" style="border:1px solid #22304f;padding:8px 12px;cursor:pointer" />
@@ -302,12 +298,10 @@ input[type="url"] {
     </div>
   </div>
 
-  <!-- CONSOLE DE LOGS -->
   <div class="h1">📋 Logs</div>
   <div id="logBox" class="log">Démarrage...</div>
 </div>
 
-<!-- LIBRARIES -->
 <script src="./src/vendor/pitchy-lite.js"></script>
 <script src="./src/utils/wav-export.js"></script>
 <script src="./src/utils/mp3-export.js"></script>
@@ -327,7 +321,7 @@ const log = (level, msg) => {
 
 log('INFO', 'Système démarré');
 
-/* ==================== DOM REFS ==================== */
+/* ==================== DOM ==================== */
 const btnMic = document.getElementById('btnMic');
 const btnRecStart = document.getElementById('btnRecStart');
 const btnRecStop = document.getElementById('btnRecStop');
@@ -361,50 +355,138 @@ let micStream = null;
 let mediaRecorder = null;
 let chunks = [];
 let lastBlob = null;
-
 let recStart = 0;
 let timerInterval = null;
 let rafId = null;
 let monitorOn = false;
 let detector = null;
 
+let recordedPitch = [];
 let refData = { pitch: [], duration: 0 };
 
-/* ==================== CANVAS SETUP ==================== */
-function clearCanvas(canvas, ctx) {
-  ctx.fillStyle = '#0b1324';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+/* ==================== CANVAS HELPERS ==================== */
+function drawCanvasRec() {
+  const w = canvasRec.width;
+  const h = canvasRec.height;
 
-  // Grille légère
-  ctx.strokeStyle = '#1a2642';
-  ctx.lineWidth = 1;
-  for (let y = 0; y <= canvas.height; y += 40) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(canvas.width, y);
-    ctx.stroke();
+  ctxRec.fillStyle = '#0b1324';
+  ctxRec.fillRect(0, 0, w, h);
+
+  // Grille
+  ctxRec.strokeStyle = '#1a2642';
+  ctxRec.lineWidth = 1;
+  for (let y = 0; y <= h; y += 40) {
+    ctxRec.beginPath();
+    ctxRec.moveTo(0, y);
+    ctxRec.lineTo(w, y);
+    ctxRec.stroke();
   }
 
-  // Ligne médiane (440 Hz = 0 cents)
-  ctx.strokeStyle = '#22c55e';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, canvas.height / 2);
-  ctx.lineTo(canvas.width, canvas.height / 2);
-  ctx.stroke();
+  // Axes
+  ctxRec.strokeStyle = '#334155';
+  ctxRec.lineWidth = 2;
+  ctxRec.beginPath();
+  ctxRec.moveTo(60, 0);
+  ctxRec.lineTo(60, h);
+  ctxRec.stroke();
+  ctxRec.beginPath();
+  ctxRec.moveTo(60, h - 40);
+  ctxRec.lineTo(w, h - 40);
+  ctxRec.stroke();
+
+  // Ligne médiane (0 cents / 440 Hz)
+  ctxRec.strokeStyle = '#22c55e';
+  ctxRec.lineWidth = 2;
+  ctxRec.beginPath();
+  ctxRec.moveTo(60, h / 2);
+  ctxRec.lineTo(w, h / 2);
+  ctxRec.stroke();
+
+  // Labels côté gauche (cents)
+  ctxRec.fillStyle = '#9ca3af';
+  ctxRec.font = 'bold 11px monospace';
+  ctxRec.textAlign = 'right';
+  ctxRec.fillText('Très grave', 55, 20);
+  ctxRec.fillText('Grave', 55, h / 2 - 60);
+  ctxRec.fillText('0c', 55, h / 2 + 5);
+  ctxRec.fillText('Aigu', 55, h / 2 + 80);
+  ctxRec.fillText('Très aigu', 55, h - 10);
+
+  // Labels bas (temps)
+  ctxRec.textAlign = 'center';
+  ctxRec.fillText('0s', 60, h - 20);
+  ctxRec.fillText('60s', w - 10, h - 20);
+  ctxRec.fillText('120s', w, h - 20);
+
+  // Graduations axe Y (cents)
+  ctxRec.strokeStyle = '#1a2642';
+  ctxRec.lineWidth = 1;
+  for (let cents = -300; cents <= 300; cents += 100) {
+    const y = h / 2 - (cents / 300) * (h / 2 - 20);
+    ctxRec.beginPath();
+    ctxRec.moveTo(55, y);
+    ctxRec.lineTo(65, y);
+    ctxRec.stroke();
+  }
+}
+
+function drawCanvasRef() {
+  const w = canvasRef.width;
+  const h = canvasRef.height;
+
+  ctxRef.fillStyle = '#0b1324';
+  ctxRef.fillRect(0, 0, w, h);
+
+  ctxRef.strokeStyle = '#1a2642';
+  ctxRef.lineWidth = 1;
+  for (let y = 0; y <= h; y += 40) {
+    ctxRef.beginPath();
+    ctxRef.moveTo(0, y);
+    ctxRef.lineTo(w, y);
+    ctxRef.stroke();
+  }
+
+  ctxRef.strokeStyle = '#334155';
+  ctxRef.lineWidth = 2;
+  ctxRef.beginPath();
+  ctxRef.moveTo(60, 0);
+  ctxRef.lineTo(60, h);
+  ctxRef.stroke();
+  ctxRef.beginPath();
+  ctxRef.moveTo(60, h - 40);
+  ctxRef.lineTo(w, h - 40);
+  ctxRef.stroke();
+
+  ctxRef.strokeStyle = '#22c55e';
+  ctxRef.lineWidth = 2;
+  ctxRef.beginPath();
+  ctxRef.moveTo(60, h / 2);
+  ctxRef.lineTo(w, h / 2);
+  ctxRef.stroke();
+
+  ctxRef.fillStyle = '#9ca3af';
+  ctxRef.font = 'bold 11px monospace';
+  ctxRef.textAlign = 'right';
+  ctxRef.fillText('Très grave', 55, 20);
+  ctxRef.fillText('0c', 55, h / 2 + 5);
+  ctxRef.fillText('Très aigu', 55, h - 10);
+
+  ctxRef.textAlign = 'center';
+  ctxRef.fillText('0s', 60, h - 20);
+  ctxRef.fillText('120s', w, h - 20);
 }
 
 function hzToCents(hz, ref = 440) {
-  return 1200 * Math.log2(hz / ref);
+  return hz > 0 ? 1200 * Math.log2(hz / ref) : 0;
 }
 
-function mapCentsToY(cents, height, zoomY = 1) {
+function mapCentsToY(cents, height) {
   const norm = cents / 300;
-  return height / 2 - (norm * height / 2) / zoomY;
+  return height / 2 - norm * (height / 2 - 20);
 }
 
-clearCanvas(canvasRec, ctxRec);
-clearCanvas(canvasRef, ctxRef);
+drawCanvasRec();
+drawCanvasRef();
 
 /* ==================== AUDIO INIT ==================== */
 async function ensureAudio() {
@@ -467,6 +549,7 @@ function startRecording() {
 
   chunks = [];
   lastBlob = null;
+  recordedPitch = [];
   recStart = audioCtx.currentTime;
 
   const options = {
@@ -517,20 +600,42 @@ function startMonitor() {
   if (rafId) return;
 
   const buf = new Float32Array(analyser.fftSize);
+  const windowSize = 50;
+  let pitchWindow = [];
 
   function tick() {
-    clearCanvas(canvasRec, ctxRec);
+    drawCanvasRec();
 
     analyser.getFloatTimeDomainData(buf);
-    const hz = detector.detect(buf);
+    let hz = detector.detect(buf);
 
     if (hz) {
-      const cents = hzToCents(hz, 440);
+      pitchWindow.push(hz);
+      if (pitchWindow.length > windowSize) {
+        pitchWindow.shift();
+      }
+
+      // Moyenne de la fenêtre
+      const avgHz = pitchWindow.reduce((a, b) => a + b, 0) / pitchWindow.length;
+      const cents = hzToCents(avgHz, 440);
       const elapsed = audioCtx.currentTime - recStart;
-      const x = 20 + (canvasRec.width - 40) * Math.min(elapsed / 120, 1);
+      const x = 60 + (canvasRec.width - 80) * Math.min(elapsed / 120, 1);
       const y = mapCentsToY(cents, canvasRec.height);
 
-      // Dessiner point
+      recordedPitch.push({ t: elapsed, hz: avgHz, cents, x, y });
+
+      // Dessiner courbe
+      if (recordedPitch.length > 1) {
+        const prev = recordedPitch[recordedPitch.length - 2];
+        ctxRec.strokeStyle = '#3b82f6';
+        ctxRec.lineWidth = 2;
+        ctxRec.beginPath();
+        ctxRec.moveTo(prev.x, prev.y);
+        ctxRec.lineTo(x, y);
+        ctxRec.stroke();
+      }
+
+      // Point
       ctxRec.fillStyle = '#3b82f6';
       ctxRec.beginPath();
       ctxRec.arc(x, y, 3, 0, Math.PI * 2);
@@ -550,7 +655,7 @@ function stopMonitor() {
     cancelAnimationFrame(rafId);
     rafId = null;
   }
-  clearCanvas(canvasRec, ctxRec);
+  drawCanvasRec();
 }
 
 /* ==================== EXPORTS ==================== */
@@ -584,20 +689,26 @@ btnDownMP3.onclick = async () => {
   if (!window.WAVExport) return log('ERROR', 'WAVExport indisponible');
   if (!window.MP3Export) return log('ERROR', 'MP3Export indisponible');
 
-  const wav = await WAVExport.fromWebM(lastBlob);
-  if (!wav) return log('ERROR', 'Conversion WAV échouée');
+  try {
+    const wav = await WAVExport.fromWebM(lastBlob);
+    if (!wav) return log('ERROR', 'Conversion WAV échouée');
 
-  const mp3 = await MP3Export.fromWav(wav);
-  if (!mp3) return log('ERROR', 'Conversion MP3 échouée');
+    log('INFO', 'Encodage MP3 en cours...');
+    const mp3 = await MP3Export.fromWav(wav);
+    if (!mp3) return log('ERROR', 'Conversion MP3 échouée');
 
-  downloadBlob(mp3, 'take.mp3');
+    downloadBlob(mp3, 'take.mp3');
+  } catch (err) {
+    log('ERROR', 'MP3: ' + err.message);
+  }
 };
 
 btnClearRec.onclick = () => {
   chunks = [];
   lastBlob = null;
+  recordedPitch = [];
   updateTimer(0);
-  clearCanvas(canvasRec, ctxRec);
+  drawCanvasRec();
   log('INFO', 'Enregistrement effacé');
 };
 
@@ -628,7 +739,7 @@ fileUploadRef.addEventListener('change', async (e) => {
     const ch = audio.getChannelData(0);
     refData.duration = audio.duration;
     refData.pitch = extractPitch(ch, audio.sampleRate);
-    drawReference();
+    drawReferenceData();
     log('INFO', `Référence chargée: ${file.name}`);
   } catch (err) {
     log('ERROR', 'Upload ref: ' + err.message);
@@ -637,11 +748,11 @@ fileUploadRef.addEventListener('change', async (e) => {
 
 btnClearRef.onclick = () => {
   refData = { pitch: [], duration: 0 };
-  clearCanvas(canvasRef, ctxRef);
+  drawCanvasRef();
   log('INFO', 'Référence effacée');
 };
 
-/* ==================== PITCH EXTRACTION (OFFLINE) ==================== */
+/* ==================== PITCH EXTRACTION ==================== */
 function extractPitch(samples, sr) {
   if (!detector) return [];
 
@@ -663,10 +774,13 @@ function extractPitch(samples, sr) {
 }
 
 /* ==================== REFERENCE DRAWING ==================== */
-function drawReference() {
-  clearCanvas(canvasRef, ctxRef);
+function drawReferenceData() {
+  drawCanvasRef();
 
   if (refData.pitch.length === 0) return;
+
+  const w = canvasRef.width;
+  const h = canvasRef.height;
 
   ctxRef.strokeStyle = '#a78bfa';
   ctxRef.lineWidth = 2;
@@ -674,8 +788,8 @@ function drawReference() {
 
   let first = true;
   for (const p of refData.pitch) {
-    const x = 20 + (canvasRef.width - 40) * (p.t / Math.max(refData.duration, 1));
-    const y = mapCentsToY(p.cents, canvasRef.height);
+    const x = 60 + (w - 80) * (p.t / Math.max(refData.duration, 1));
+    const y = mapCentsToY(p.cents, h);
 
     if (first) {
       ctxRef.moveTo(x, y);
@@ -687,7 +801,7 @@ function drawReference() {
 
   ctxRef.stroke();
 
-  // Stats simples
+  // Stats
   if (refData.pitch.length > 0) {
     const devs = refData.pitch.map(p => Math.abs(p.cents));
     const avg = devs.reduce((a, b) => a + b, 0) / devs.length;
@@ -700,9 +814,8 @@ function drawReference() {
   }
 }
 
-/* ==================== EVENT LISTENERS ==================== */
+/* ==================== EVENTS ==================== */
 btnMic.onclick = () => activateMic();
-
 btnRecStart.onclick = () => startRecording();
 btnRecStop.onclick = () => stopRecording();
 

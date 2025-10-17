@@ -1,395 +1,341 @@
 /**
  * CompatibilityChecker.js
- * TYPE: Utility - Compatibility Validator
+ * TYPE: Utility - Compatibility Verification
  * 
  * Responsabilités:
- * - Vérifier que toutes les features requises sont disponibles
- * - Générer un rapport de compatibilité détaillé
- * - Fournir des messages d'erreur clairs pour l'utilisateur
- * - Suggérer des solutions si incompatibilité
+ * - Vérification complète des APIs requises
+ * - Détection des limitations navigateur
+ * - Recommendations fallback
+ * - Rapport de compatibilité détaillé
  * 
- * Dépendances: Logger, BrowserDetector, CONFIG
+ * Dépendances: Logger, BrowserDetector
+ * Utilisé par: app.js, AudioEngine
  */
 
-import { Logger } from '../logging/Logger.js';
-import { BrowserDetector } from './BrowserDetector.js';
-import { CONFIG } from '../config.js';
+import { Logger } from './logging/Logger.js';
+import { BrowserDetector } from './utils/BrowserDetector.js';
 
-export class CompatibilityChecker {
+class CompatibilityChecker {
+  static #checksCache = null;
 
   /**
-   * Vérifie la compatibilité complète
-   * @returns {object} Rapport de compatibilité
+   * Vérifier toutes les compatibilités
    */
-  static check() {
-    Logger.info('CompatibilityChecker', 'Starting compatibility check...');
-
+  static checkAll() {
     try {
-      const report = {
-        compatible: true,
-        browser: null,
-        features: {},
-        missing: [],
+      if (CompatibilityChecker.#checksCache) {
+        return CompatibilityChecker.#checksCache;
+      }
+
+      Logger.info('CompatibilityChecker', 'Running full compatibility check');
+
+      const checks = {
+        timestamp: new Date().toISOString(),
+        browser: BrowserDetector.detect(),
+        apis: {
+          webAudio: CompatibilityChecker.#checkWebAudio(),
+          mediaRecorder: CompatibilityChecker.#checkMediaRecorder(),
+          mediaDevices: CompatibilityChecker.#checkMediaDevices(),
+          audioWorklet: CompatibilityChecker.#checkAudioWorklet(),
+          webWorker: CompatibilityChecker.#checkWebWorker(),
+          promise: CompatibilityChecker.#checkPromise(),
+          fetch: CompatibilityChecker.#checkFetch(),
+          indexedDB: CompatibilityChecker.#checkIndexedDB(),
+          localStorage: CompatibilityChecker.#checkLocalStorage(),
+        },
+        overallSupport: false,
+        criticalsIssues: [],
         warnings: [],
         recommendations: [],
-        canProceed: true,
       };
 
-      // 1. Détecter le navigateur
-      report.browser = BrowserDetector.detect();
-      Logger.debug('CompatibilityChecker', 'Browser info', report.browser);
+      // Déterminer si compatible
+      checks.overallSupport = CompatibilityChecker.#evaluateOverallSupport(checks);
 
-      // 2. Vérifier chaque feature requise
-      const requiredFeatures = CONFIG.compatibility.required;
-      
-      for (const feature of requiredFeatures) {
-        const supported = BrowserDetector.supportsFeature(feature);
-        report.features[feature] = supported;
+      // Collecter les problèmes
+      CompatibilityChecker.#collectIssues(checks);
 
-        if (!supported) {
-          report.missing.push(feature);
-          report.compatible = false;
-          Logger.warn('CompatibilityChecker', `Missing feature: ${feature}`);
+      CompatibilityChecker.#checksCache = checks;
+      Logger.info('CompatibilityChecker', 'Check complete', checks);
+
+      return checks;
+    } catch (err) {
+      Logger.error('CompatibilityChecker', 'Check failed', err);
+      return CompatibilityChecker.#getFallbackChecks();
+    }
+  }
+
+  /**
+   * Vérifier Web Audio API
+   */
+  static #checkWebAudio() {
+    try {
+      const supported = !!(window.AudioContext || window.webkitAudioContext);
+      Logger.debug('CompatibilityChecker', 'Web Audio API', { supported });
+      return {
+        supported,
+        name: 'Web Audio API',
+        critical: true,
+        fallback: 'None - Application will not work',
+      };
+    } catch (err) {
+      Logger.warn('CompatibilityChecker', 'Web Audio check failed', err);
+      return { supported: false, name: 'Web Audio API', critical: true, fallback: 'None' };
+    }
+  }
+
+  /**
+   * Vérifier MediaRecorder
+   */
+  static #checkMediaRecorder() {
+    try {
+      const supported = !!window.MediaRecorder;
+      Logger.debug('CompatibilityChecker', 'MediaRecorder', { supported });
+      return {
+        supported,
+        name: 'MediaRecorder API',
+        critical: true,
+        fallback: 'Audio-recorder-polyfill available',
+      };
+    } catch (err) {
+      Logger.warn('CompatibilityChecker', 'MediaRecorder check failed', err);
+      return { supported: false, name: 'MediaRecorder API', critical: true, fallback: 'Polyfill' };
+    }
+  }
+
+  /**
+   * Vérifier MediaDevices (getUserMedia)
+   */
+  static #checkMediaDevices() {
+    try {
+      const supported = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+      Logger.debug('CompatibilityChecker', 'MediaDevices', { supported });
+      return {
+        supported,
+        name: 'MediaDevices (getUserMedia)',
+        critical: true,
+        fallback: 'None - Microphone access required',
+      };
+    } catch (err) {
+      Logger.warn('CompatibilityChecker', 'MediaDevices check failed', err);
+      return { supported: false, name: 'MediaDevices', critical: true, fallback: 'None' };
+    }
+  }
+
+  /**
+   * Vérifier AudioWorklet
+   */
+  static #checkAudioWorklet() {
+    try {
+      const supported = !!(window.AudioContext && window.AudioContext.prototype.audioWorklet);
+      Logger.debug('CompatibilityChecker', 'AudioWorklet', { supported });
+      return {
+        supported,
+        name: 'AudioWorklet',
+        critical: false,
+        fallback: 'ScriptProcessorNode (deprecated but functional)',
+      };
+    } catch (err) {
+      Logger.warn('CompatibilityChecker', 'AudioWorklet check failed', err);
+      return { supported: false, name: 'AudioWorklet', critical: false, fallback: 'ScriptProcessorNode' };
+    }
+  }
+
+  /**
+   * Vérifier Web Workers
+   */
+  static #checkWebWorker() {
+    try {
+      const supported = typeof Worker !== 'undefined';
+      Logger.debug('CompatibilityChecker', 'Web Workers', { supported });
+      return {
+        supported,
+        name: 'Web Workers',
+        critical: false,
+        fallback: 'Main thread (slower for MP3 encoding)',
+      };
+    } catch (err) {
+      Logger.warn('CompatibilityChecker', 'Web Workers check failed', err);
+      return { supported: false, name: 'Web Workers', critical: false, fallback: 'Main thread' };
+    }
+  }
+
+  /**
+   * Vérifier Promises
+   */
+  static #checkPromise() {
+    try {
+      const supported = typeof Promise !== 'undefined';
+      Logger.debug('CompatibilityChecker', 'Promises', { supported });
+      return {
+        supported,
+        name: 'Promises',
+        critical: true,
+        fallback: 'None - Required for async',
+      };
+    } catch (err) {
+      Logger.warn('CompatibilityChecker', 'Promises check failed', err);
+      return { supported: false, name: 'Promises', critical: true, fallback: 'None' };
+    }
+  }
+
+  /**
+   * Vérifier Fetch API
+   */
+  static #checkFetch() {
+    try {
+      const supported = typeof fetch !== 'undefined';
+      Logger.debug('CompatibilityChecker', 'Fetch API', { supported });
+      return {
+        supported,
+        name: 'Fetch API',
+        critical: false,
+        fallback: 'XMLHttpRequest',
+      };
+    } catch (err) {
+      Logger.warn('CompatibilityChecker', 'Fetch check failed', err);
+      return { supported: false, name: 'Fetch API', critical: false, fallback: 'XMLHttpRequest' };
+    }
+  }
+
+  /**
+   * Vérifier IndexedDB
+   */
+  static #checkIndexedDB() {
+    try {
+      const supported = !!(window.indexedDB || window.webkitIndexedDB);
+      Logger.debug('CompatibilityChecker', 'IndexedDB', { supported });
+      return {
+        supported,
+        name: 'IndexedDB',
+        critical: false,
+        fallback: 'localStorage (limité à 5MB)',
+      };
+    } catch (err) {
+      Logger.warn('CompatibilityChecker', 'IndexedDB check failed', err);
+      return { supported: false, name: 'IndexedDB', critical: false, fallback: 'localStorage' };
+    }
+  }
+
+  /**
+   * Vérifier localStorage
+   */
+  static #checkLocalStorage() {
+    try {
+      const test = '__compat_test__';
+      localStorage.setItem(test, test);
+      localStorage.removeItem(test);
+      Logger.debug('CompatibilityChecker', 'localStorage', { supported: true });
+      return {
+        supported: true,
+        name: 'localStorage',
+        critical: false,
+        fallback: 'In-memory storage only',
+      };
+    } catch (err) {
+      Logger.warn('CompatibilityChecker', 'localStorage check failed', err);
+      return { supported: false, name: 'localStorage', critical: false, fallback: 'In-memory' };
+    }
+  }
+
+  /**
+   * Évaluer si globalement compatible
+   */
+  static #evaluateOverallSupport(checks) {
+    try {
+      const criticals = Object.values(checks.apis).filter(api => api.critical);
+      const allCriticalsSupported = criticals.every(api => api.supported);
+      Logger.info('CompatibilityChecker', 'Overall support evaluation', { allCriticalsSupported });
+      return allCriticalsSupported;
+    } catch (err) {
+      Logger.error('CompatibilityChecker', 'Support evaluation failed', err);
+      return false;
+    }
+  }
+
+  /**
+   * Collecter les problèmes et warnings
+   */
+  static #collectIssues(checks) {
+    try {
+      Object.values(checks.apis).forEach(api => {
+        if (api.critical && !api.supported) {
+          checks.criticalsIssues.push(`${api.name} is not supported`);
+        } else if (!api.supported) {
+          checks.warnings.push(`${api.name} not supported, will use: ${api.fallback}`);
         }
-      }
-
-      // 3. Vérifier version navigateur
-      if (!report.browser.supported) {
-        const minVersion = CONFIG.compatibility.browsers[report.browser.name]?.min;
-        report.warnings.push(
-          `Version ${report.browser.name} trop ancienne (minimum: ${minVersion}, actuelle: ${report.browser.version})`
-        );
-        report.recommendations.push('Mettez à jour votre navigateur pour une meilleure expérience');
-      }
-
-      // 4. Vérifier limitations spécifiques
-      if (report.browser.limitations.length > 0) {
-        report.warnings.push(`Limitations détectées: ${report.browser.limitations.join(', ')}`);
-        
-        if (report.browser.limitations.includes('14khz_max')) {
-          report.recommendations.push('Pour une qualité audio optimale, utilisez Chrome sur ordinateur');
-        }
-      }
-
-      // 5. Vérifier mobile
-      if (report.browser.mobile) {
-        report.warnings.push('Appareil mobile détecté - latence plus élevée possible');
-        report.recommendations.push('Utilisez des écouteurs pour éviter l\'effet Larsen');
-      }
-
-      // 6. Déterminer si on peut continuer
-      report.canProceed = report.missing.length === 0;
-
-      // 7. Générer messages utilisateur
-      report.userMessage = CompatibilityChecker.#generateUserMessage(report);
-
-      Logger.info('CompatibilityChecker', 'Compatibility check complete', {
-        compatible: report.compatible,
-        canProceed: report.canProceed,
-        missingCount: report.missing.length,
-        warningCount: report.warnings.length,
       });
 
-      return report;
+      // Recommendations spécifiques
+      if (!checks.apis.audioWorklet.supported) {
+        checks.recommendations.push('AudioWorklet not supported - using deprecated ScriptProcessorNode');
+      }
+      if (!checks.apis.webWorker.supported) {
+        checks.recommendations.push('Web Workers not supported - MP3 encoding will block main thread');
+      }
+      if (!checks.apis.indexedDB.supported && checks.apis.localStorage.supported) {
+        checks.recommendations.push('IndexedDB not available - recordings limited to 5MB');
+      }
 
-    } catch (error) {
-      Logger.error('CompatibilityChecker', 'Compatibility check failed', error);
-      
-      // Retourner un rapport d'erreur
-      return {
-        compatible: false,
-        canProceed: false,
-        error: true,
-        userMessage: 'Impossible de vérifier la compatibilité. Rechargez la page.',
-        missing: ['unknown'],
-        features: {},
-        warnings: [],
-        recommendations: [],
-      };
+      Logger.info('CompatibilityChecker', 'Issues collected', {
+        criticalsCount: checks.criticalsIssues.length,
+        warningsCount: checks.warnings.length,
+        recommendationsCount: checks.recommendations.length,
+      });
+    } catch (err) {
+      Logger.error('CompatibilityChecker', 'Issue collection failed', err);
     }
   }
 
   /**
-   * Génère un message utilisateur clair
-   * @private
+   * Obtenir rapport lisible
    */
-  static #generateUserMessage(report) {
-    if (report.canProceed && report.compatible) {
-      return {
-        type: 'success',
-        title: 'Navigateur compatible !',
-        message: 'Votre navigateur supporte toutes les fonctionnalités nécessaires.',
-        details: report.warnings.length > 0 ? report.warnings : null,
-      };
-    }
-
-    if (!report.canProceed) {
-      const messages = CONFIG.errorMessages.fr;
-      
-      return {
-        type: 'error',
-        title: 'Navigateur non compatible',
-        message: messages.browser_not_supported,
-        details: report.missing,
-        recommendations: report.recommendations,
-      };
-    }
-
-    return {
-      type: 'warning',
-      title: 'Compatibilité partielle',
-      message: 'Votre navigateur fonctionne mais avec des limitations.',
-      details: report.warnings,
-      recommendations: report.recommendations,
-    };
-  }
-
-  /**
-   * Vérifie si une feature spécifique est disponible
-   * @param {string} feature - Nom de la feature
-   * @returns {boolean}
-   */
-  static hasFeature(feature) {
-    return BrowserDetector.supportsFeature(feature);
-  }
-
-  /**
-   * Vérifie spécifiquement les APIs audio
-   * @returns {object} Rapport audio
-   */
-  static checkAudio() {
-    Logger.debug('CompatibilityChecker', 'Checking audio features...');
-
-    const audioReport = {
-      audioContext: false,
-      analyser: false,
-      mediaRecorder: false,
-      getUserMedia: false,
-      webAudio: false,
-      recommendedFormat: null,
-      supportedFormats: [],
-    };
-
+  static getReport() {
     try {
-      // AudioContext
-      audioReport.audioContext = BrowserDetector.supportsFeature('AudioContext');
-
-      // AnalyserNode
-      audioReport.analyser = BrowserDetector.supportsFeature('AnalyserNode');
-
-      // MediaRecorder
-      audioReport.mediaRecorder = BrowserDetector.supportsFeature('MediaRecorder');
-
-      // getUserMedia
-      audioReport.getUserMedia = BrowserDetector.supportsFeature('getUserMedia');
-
-      // Web Audio complet
-      audioReport.webAudio = audioReport.audioContext && audioReport.analyser;
-
-      // Format recommandé
-      audioReport.recommendedFormat = BrowserDetector.getRecommendedRecordingFormat();
-
-      // Formats supportés
-      const formats = Object.values(CONFIG.audio.formats);
-      for (const format of formats) {
-        if (BrowserDetector.supportsRecordingFormat(format)) {
-          audioReport.supportedFormats.push(format);
-        }
-      }
-
-      Logger.debug('CompatibilityChecker', 'Audio check complete', audioReport);
-      return audioReport;
-
-    } catch (error) {
-      Logger.error('CompatibilityChecker', 'Audio check failed', error);
-      return audioReport;
-    }
-  }
-
-  /**
-   * Vérifie les APIs de storage
-   * @returns {object} Rapport storage
-   */
-  static checkStorage() {
-    Logger.debug('CompatibilityChecker', 'Checking storage features...');
-
-    const storageReport = {
-      localStorage: false,
-      sessionStorage: false,
-      indexedDB: false,
-      localStorageSize: 0,
-    };
-
-    try {
-      // localStorage
-      storageReport.localStorage = BrowserDetector.supportsFeature('localStorage');
-
-      // sessionStorage
-      try {
-        const test = '__session_test__';
-        sessionStorage.setItem(test, test);
-        sessionStorage.removeItem(test);
-        storageReport.sessionStorage = true;
-      } catch (e) {
-        storageReport.sessionStorage = false;
-      }
-
-      // IndexedDB
-      storageReport.indexedDB = BrowserDetector.supportsFeature('IndexedDB');
-
-      // Taille utilisée (approximation)
-      if (storageReport.localStorage) {
-        try {
-          let size = 0;
-          for (let key in localStorage) {
-            if (localStorage.hasOwnProperty(key)) {
-              size += localStorage[key].length + key.length;
-            }
-          }
-          storageReport.localStorageSize = size;
-        } catch (e) {
-          // Ignore
-        }
-      }
-
-      Logger.debug('CompatibilityChecker', 'Storage check complete', storageReport);
-      return storageReport;
-
-    } catch (error) {
-      Logger.error('CompatibilityChecker', 'Storage check failed', error);
-      return storageReport;
-    }
-  }
-
-  /**
-   * Vérifie la performance du système
-   * @returns {object} Rapport performance
-   */
-  static async checkPerformance() {
-    Logger.debug('CompatibilityChecker', 'Checking performance...');
-
-    const perfReport = {
-      cores: 1,
-      memory: 0,
-      connection: 'unknown',
-      deviceMemory: 0,
-      hardwareConcurrency: 1,
-    };
-
-    try {
-      // Nombre de cores
-      perfReport.hardwareConcurrency = navigator.hardwareConcurrency || 1;
-      perfReport.cores = perfReport.hardwareConcurrency;
-
-      // Mémoire appareil (si disponible)
-      if ('deviceMemory' in navigator) {
-        perfReport.deviceMemory = navigator.deviceMemory; // En GB
-      }
-
-      // Type de connexion
-      if ('connection' in navigator) {
-        const conn = navigator.connection;
-        perfReport.connection = conn.effectiveType || 'unknown';
-        perfReport.downlink = conn.downlink; // Mbps
-        perfReport.rtt = conn.rtt; // ms
-      }
-
-      Logger.debug('CompatibilityChecker', 'Performance check complete', perfReport);
-      return perfReport;
-
-    } catch (error) {
-      Logger.error('CompatibilityChecker', 'Performance check failed', error);
-      return perfReport;
-    }
-  }
-
-  /**
-   * Génère un rapport complet (tout)
-   * @returns {object} Rapport global
-   */
-  static async generateFullReport() {
-    Logger.info('CompatibilityChecker', 'Generating full compatibility report...');
-
-    try {
+      const checks = CompatibilityChecker.checkAll();
       const report = {
-        timestamp: new Date().toISOString(),
-        general: CompatibilityChecker.check(),
-        audio: CompatibilityChecker.checkAudio(),
-        storage: CompatibilityChecker.checkStorage(),
-        performance: await CompatibilityChecker.checkPerformance(),
+        overall: checks.overallSupport,
+        browser: `${checks.browser.browser} ${checks.browser.version} on ${checks.browser.os}`,
+        criticalIssues: checks.criticalsIssues,
+        warnings: checks.warnings,
+        recommendations: checks.recommendations,
+        details: checks.apis,
+        canProceed: checks.overallSupport,
       };
-
-      Logger.info('CompatibilityChecker', 'Full report generated', report);
+      Logger.info('CompatibilityChecker', 'Report generated', report);
       return report;
-
-    } catch (error) {
-      Logger.error('CompatibilityChecker', 'Full report generation failed', error);
-      return null;
+    } catch (err) {
+      Logger.error('CompatibilityChecker', 'Report generation failed', err);
+      return CompatibilityChecker.#getFallbackReport();
     }
   }
 
   /**
-   * Exporte le rapport en texte lisible
-   * @returns {string}
+   * Fallback en cas d'erreur
    */
-  static async exportReportAsText() {
-    const report = await CompatibilityChecker.generateFullReport();
-    
-    if (!report) return 'Erreur lors de la génération du rapport';
+  static #getFallbackChecks() {
+    return {
+      timestamp: new Date().toISOString(),
+      browser: { browser: 'Unknown', os: 'Unknown', version: 'Unknown' },
+      apis: {},
+      overallSupport: false,
+      criticalsIssues: ['Compatibility check failed'],
+      warnings: [],
+      recommendations: ['Please use a modern browser (Chrome, Firefox, Safari)'],
+    };
+  }
 
-    let text = '=== RAPPORT DE COMPATIBILITÉ ===\n\n';
-    text += `Date: ${report.timestamp}\n\n`;
-
-    // Navigateur
-    text += '--- NAVIGATEUR ---\n';
-    text += `Nom: ${report.general.browser.name}\n`;
-    text += `Version: ${report.general.browser.fullVersion}\n`;
-    text += `OS: ${report.general.browser.os}\n`;
-    text += `Mobile: ${report.general.browser.mobile ? 'Oui' : 'Non'}\n`;
-    text += `Compatible: ${report.general.compatible ? 'Oui' : 'Non'}\n\n`;
-
-    // Features
-    text += '--- FEATURES ---\n';
-    for (const [feature, supported] of Object.entries(report.general.features)) {
-      text += `${feature}: ${supported ? '✓' : '✗'}\n`;
-    }
-    text += '\n';
-
-    // Audio
-    text += '--- AUDIO ---\n';
-    text += `Web Audio: ${report.audio.webAudio ? '✓' : '✗'}\n`;
-    text += `MediaRecorder: ${report.audio.mediaRecorder ? '✓' : '✗'}\n`;
-    text += `getUserMedia: ${report.audio.getUserMedia ? '✓' : '✗'}\n`;
-    text += `Format recommandé: ${report.audio.recommendedFormat}\n\n`;
-
-    // Storage
-    text += '--- STORAGE ---\n';
-    text += `localStorage: ${report.storage.localStorage ? '✓' : '✗'}\n`;
-    text += `IndexedDB: ${report.storage.indexedDB ? '✓' : '✗'}\n`;
-    text += `Taille utilisée: ${(report.storage.localStorageSize / 1024).toFixed(2)} KB\n\n`;
-
-    // Performance
-    text += '--- PERFORMANCE ---\n';
-    text += `Cores CPU: ${report.performance.cores}\n`;
-    text += `Mémoire: ${report.performance.deviceMemory || 'N/A'} GB\n`;
-    text += `Connexion: ${report.performance.connection}\n\n`;
-
-    // Warnings
-    if (report.general.warnings.length > 0) {
-      text += '--- AVERTISSEMENTS ---\n';
-      report.general.warnings.forEach(w => text += `⚠ ${w}\n`);
-      text += '\n';
-    }
-
-    // Recommendations
-    if (report.general.recommendations.length > 0) {
-      text += '--- RECOMMANDATIONS ---\n';
-      report.general.recommendations.forEach(r => text += `💡 ${r}\n`);
-    }
-
-    return text;
+  static #getFallbackReport() {
+    return {
+      overall: false,
+      browser: 'Unknown',
+      criticalIssues: ['Compatibility check failed'],
+      warnings: [],
+      recommendations: ['Use modern browser'],
+      canProceed: false,
+    };
   }
 }
 
-// Export par défaut
+export { CompatibilityChecker };
 export default CompatibilityChecker;

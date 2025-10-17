@@ -1,187 +1,247 @@
 /**
  * Logger.js
- * TYPE: Utility - Logging System
+ * TYPE: Utility - Singleton Logging System
  * 
  * Responsabilités:
- * - Logging centralisé pour toute l'application
- * - Niveaux de log : DEBUG, INFO, WARN, ERROR, CRITICAL
- * - Formatage des messages
- * - Stockage optionnel des logs
+ * - Logging centralisé avec timestamps précis
+ * - Niveaux: DEBUG, INFO, WARN, ERROR, FATAL
+ * - Affichage console + storage en mémoire
+ * - Fallback robuste si quelque chose échoue
  * 
- * Dépendances: Aucune (module de base)
+ * Dépendances: AUCUNE (fondation)
+ * Utilisé par: TOUS les autres modules
  */
 
-export class Logger {
-  // Niveaux de log
-  static LEVELS = {
-    DEBUG: 0,
-    INFO: 1,
-    WARN: 2,
-    ERROR: 3,
-    CRITICAL: 4
+class Logger {
+  /**
+   * Configuration statique du logger
+   */
+  static #config = {
+    maxLogs: 500,
+    minLevel: 0,
+    enableConsole: true,
+    enableStorage: true,
   };
 
-  // Niveau minimum à afficher (défaut: INFO)
-  static minLevel = Logger.LEVELS.INFO;
-
-  // Historique des logs (optionnel)
-  static history = [];
-  static maxHistorySize = 1000;
-
-  // Activation/désactivation
-  static enabled = true;
+  /**
+   * Niveaux de log avec priorités
+   */
+  static #levels = {
+    DEBUG: { value: 0, color: '#888', style: '[DEBUG]' },
+    INFO: { value: 1, color: '#0ea5e9', style: '[INFO]' },
+    WARN: { value: 2, color: '#f59e0b', style: '[WARN]' },
+    ERROR: { value: 3, color: '#ef4444', style: '[ERROR]' },
+    FATAL: { value: 4, color: '#dc2626', style: '[FATAL]' },
+  };
 
   /**
-   * Configure le logger
-   * @param {object} config - Configuration
+   * Stockage des logs en mémoire
    */
-  static configure(config = {}) {
-    if (config.minLevel !== undefined) {
-      Logger.minLevel = config.minLevel;
-    }
-    if (config.enabled !== undefined) {
-      Logger.enabled = config.enabled;
-    }
-    if (config.maxHistorySize !== undefined) {
-      Logger.maxHistorySize = config.maxHistorySize;
-    }
-  }
+  static #logBuffer = [];
 
   /**
-   * Formate un message de log
-   * @private
+   * État du logger
    */
-  static #formatMessage(level, module, message, data) {
-    const timestamp = new Date().toISOString();
-    const levelName = Object.keys(Logger.LEVELS).find(
-      key => Logger.LEVELS[key] === level
-    );
-    
-    let formatted = `[${timestamp}] [${levelName}] [${module}] ${message}`;
-    
-    if (data !== undefined) {
-      formatted += ` | Data: ${JSON.stringify(data)}`;
-    }
-    
-    return formatted;
-  }
+  static #initialized = false;
 
   /**
-   * Enregistre un log
-   * @private
+   * Initialiser le logger
    */
-  static #log(level, module, message, data) {
-    if (!Logger.enabled) return;
-    if (level < Logger.minLevel) return;
-
-    const formatted = Logger.#formatMessage(level, module, message, data);
-
-    // Ajouter à l'historique
-    Logger.history.push({
-      timestamp: new Date().toISOString(),
-      level,
-      module,
-      message,
-      data
-    });
-
-    // Limiter la taille de l'historique
-    if (Logger.history.length > Logger.maxHistorySize) {
-      Logger.history.shift();
-    }
-
-    // Afficher dans la console
-    switch (level) {
-      case Logger.LEVELS.DEBUG:
-        console.debug(formatted, data !== undefined ? data : '');
-        break;
-      case Logger.LEVELS.INFO:
-        console.info(formatted, data !== undefined ? data : '');
-        break;
-      case Logger.LEVELS.WARN:
-        console.warn(formatted, data !== undefined ? data : '');
-        break;
-      case Logger.LEVELS.ERROR:
-        console.error(formatted, data !== undefined ? data : '');
-        break;
-      case Logger.LEVELS.CRITICAL:
-        console.error('🔴 CRITICAL:', formatted, data !== undefined ? data : '');
-        break;
+  static initialize(options = {}) {
+    try {
+      Logger.#config = { ...Logger.#config, ...options };
+      Logger.#initialized = true;
+      Logger.info('Logger', 'Initialized');
+      return true;
+    } catch (err) {
+      console.error('[Logger] Initialization failed:', err);
+      return false;
     }
   }
 
   /**
-   * Log DEBUG
+   * DEBUG - Informations détaillées pour le développement
    */
-  static debug(module, message, data) {
-    Logger.#log(Logger.LEVELS.DEBUG, module, message, data);
+  static debug(module, message, data = null) {
+    Logger.#log('DEBUG', module, message, data);
   }
 
   /**
-   * Log INFO
+   * INFO - Informations générales
    */
-  static info(module, message, data) {
-    Logger.#log(Logger.LEVELS.INFO, module, message, data);
+  static info(module, message, data = null) {
+    Logger.#log('INFO', module, message, data);
   }
 
   /**
-   * Log WARN
+   * WARN - Avertissements
    */
-  static warn(module, message, data) {
-    Logger.#log(Logger.LEVELS.WARN, module, message, data);
+  static warn(module, message, data = null) {
+    Logger.#log('WARN', module, message, data);
   }
 
   /**
-   * Log ERROR
+   * ERROR - Erreurs
    */
-  static error(module, message, data) {
-    Logger.#log(Logger.LEVELS.ERROR, module, message, data);
+  static error(module, message, data = null) {
+    Logger.#log('ERROR', module, message, data);
   }
 
   /**
-   * Log CRITICAL
+   * FATAL - Erreurs critiques
    */
-  static critical(module, message, data) {
-    Logger.#log(Logger.LEVELS.CRITICAL, module, message, data);
+  static fatal(module, message, data = null) {
+    Logger.#log('FATAL', module, message, data);
   }
 
   /**
-   * Récupère l'historique des logs
+   * Fonction interne: Traitement du log
    */
-  static getHistory(filter = {}) {
-    let filtered = Logger.history;
+  static #log(levelName, module, message, data = null) {
+    try {
+      const level = Logger.#levels[levelName];
+      if (!level || level.value < Logger.#config.minLevel) {
+        return;
+      }
 
-    if (filter.level !== undefined) {
-      filtered = filtered.filter(log => log.level === filter.level);
+      const now = new Date();
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+      const ms = String(now.getMilliseconds()).padStart(3, '0');
+      const timestamp = `${hours}:${minutes}:${seconds}.${ms}`;
+
+      const logEntry = {
+        timestamp,
+        level: levelName,
+        module: module || 'Unknown',
+        message: message || '(no message)',
+        data: data || null,
+        formattedMessage: `[${timestamp}] ${level.style} [${module}] ${message}`,
+      };
+
+      if (Logger.#config.enableConsole) {
+        Logger.#logToConsole(level, logEntry);
+      }
+
+      if (Logger.#config.enableStorage) {
+        Logger.#logToBuffer(logEntry);
+      }
+    } catch (err) {
+      try {
+        console.error('[Logger FALLBACK]', err.message);
+      } catch (_) {
+        // Abandon silencieux
+      }
     }
-
-    if (filter.module !== undefined) {
-      filtered = filtered.filter(log => log.module === filter.module);
-    }
-
-    if (filter.since !== undefined) {
-      filtered = filtered.filter(log => new Date(log.timestamp) >= filter.since);
-    }
-
-    return filtered;
   }
 
   /**
-   * Efface l'historique
+   * Affichage console avec couleurs et données
    */
-  static clearHistory() {
-    Logger.history = [];
+  static #logToConsole(level, logEntry) {
+    try {
+      const style = `color: ${level.color}; font-weight: bold; font-family: monospace;`;
+      const dataStr = logEntry.data ? ` | Data: ${JSON.stringify(logEntry.data)}` : '';
+
+      console.log(
+        `%c${logEntry.formattedMessage}${dataStr}`,
+        style
+      );
+
+      if (level.value >= 3) {
+        console.trace('[Stack trace]');
+      }
+    } catch (err) {
+      console.log(logEntry.formattedMessage, logEntry.data || '');
+    }
   }
 
   /**
-   * Exporte les logs en texte
+   * Stockage en mémoire (buffer)
+   */
+  static #logToBuffer(logEntry) {
+    try {
+      Logger.#logBuffer.push(logEntry);
+
+      if (Logger.#logBuffer.length > Logger.#config.maxLogs) {
+        Logger.#logBuffer = Logger.#logBuffer.slice(-Logger.#config.maxLogs);
+      }
+    } catch (err) {
+      // Fallback silencieux
+    }
+  }
+
+  /**
+   * Récupérer tous les logs en mémoire
+   */
+  static getLogs() {
+    try {
+      return [...Logger.#logBuffer];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /**
+   * Récupérer les logs formatés (string)
+   */
+  static getLogsFormatted() {
+    try {
+      return Logger.#logBuffer
+        .map(log => log.formattedMessage)
+        .join('\n');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /**
+   * Nettoyer les logs
+   */
+  static clearLogs() {
+    try {
+      Logger.#logBuffer = [];
+      Logger.info('Logger', 'Logs cleared');
+    } catch (_) {
+      console.log('[Logger] Logs cleared');
+    }
+  }
+
+  /**
+   * Exporter les logs (pour debugging)
    */
   static exportLogs() {
-    return Logger.history.map(log => 
-      Logger.#formatMessage(log.level, log.module, log.message, log.data)
-    ).join('\n');
+    try {
+      return JSON.stringify(Logger.#logBuffer, null, 2);
+    } catch (_) {
+      return '[]';
+    }
+  }
+
+  /**
+   * Configurer le logger
+   */
+  static setConfig(options) {
+    try {
+      Logger.#config = { ...Logger.#config, ...options };
+      Logger.info('Logger', 'Configuration updated');
+    } catch (_) {
+      console.log('[Logger] Config update failed');
+    }
+  }
+
+  /**
+   * Vérifier si le logger est initialisé
+   */
+  static isInitialized() {
+    return Logger.#initialized;
   }
 }
 
-// Export par défaut aussi
+// Alias court pour usage rapide
+window.Log = Logger;
+
+// Export pour modules ES6
+export { Logger };
 export default Logger;

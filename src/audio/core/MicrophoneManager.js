@@ -1,124 +1,253 @@
-// MicrophoneManager.js — permissions, source, MediaRecorder + exports WAV/MP3
-export default class MicrophoneManager {
-  #engine; #stream=null; #source=null; #rec=null; #chunks=[];
-  constructor(engine){ this.#engine = engine; }
+/**
+ * MicrophoneManager.js
+ * TYPE: Manager - Microphone Access and Stream Management
+ * 
+ * Responsabilités:
+ * - Gestion permissions micro (getUserMedia)
+ * - Gestion du stream audio
+ * - Gestion des erreurs permissions
+ * - Fallback et recovery
+ * 
+ * Dépendances: Logger, AudioEngine, ErrorHandler
+ * Utilisé par: RecorderService, PitchDetector
+ */
 
-  async open(){
-    if (this.#stream) return;
-    const constraints = { audio: {
-      channelCount: 1, noiseSuppression: true, echoCancellation: true, autoGainControl: true,
-      sampleRate: this.#engine.sampleRate()
-    }};
-    this.#stream = await navigator.mediaDevices.getUserMedia(constraints);
-  }
-  isOpen(){ return !!this.#stream; }
+import { Logger } from '../logging/Logger.js';
+import { AudioEngine } from './AudioEngine.js';
+import { ErrorHandler } from './ErrorHandler.js';
 
-  createSource(){
-    if (!this.#stream) throw new Error('Micro non ouvert');
-    const src = this.#engine.ctx().createMediaStreamSource(this.#stream);
-    this.#source = src; return src;
-  }
-  getSource(){ return this.#source; }
+class MicrophoneManager {
+  #stream = null;
+  #source = null;
+  #engine = null;
+  #errorHandler = null;
+  #constraints = {
+    audio: {
+      channelCount: 1,
+      noiseSuppression: true,
+      echoCancellation: true,
+      autoGainControl: true,
+    },
+    video: false,
+  };
+  #state = 'idle';
 
-  async startRecording(){
-    if (!this.#stream) throw new Error('Micro non ouvert');
-    this.#chunks = [];
-    const mime = this.#pickMimeType();
-    this.#rec = new MediaRecorder(this.#stream, { mimeType: mime, audioBitsPerSecond: 128000 });
-    this.#rec.ondataavailable = (e)=>{ if (e.data && e.data.size) this.#chunks.push(e.data); };
-    this.#rec.start();
-  }
-  async stopRecording(){
-    if (!this.#rec) return null;
-    const done = new Promise(res=>{
-      this.#rec.onstop = ()=>res(new Blob(this.#chunks, { type: this.#rec.mimeType }));
-    });
-    this.#rec.stop();
-    return await done;
-  }
-
-  // ——— Exports
-  async exportWav(){
-    // Décodage → ré-encodage PCM WAV
-    const webm = await this.stopRecordingIfRunning();
-    const buf = await webm.arrayBuffer();
-    const audio = await new AudioContext().decodeAudioData(buf);
-    const wav = this.#encodeWav(audio);
-    return new Blob([wav], { type: 'audio/wav' });
-  }
-
-  async exportMp3(){
-    // Simple transcoding client (lamejs). CDN light si présent, fallback WAV -> MP3 minimal.
-    if (!window.lamejs) {
-      // charger à la volée
-      await this.#loadScript('https://cdn.jsdelivr.net/npm/lamejs@1.2.0/lame.min.js');
+  constructor(errorHandler = null) {
+    try {
+      this.#engine = AudioEngine.getInstance();
+      this.#errorHandler = errorHandler;
+      Logger.info('MicrophoneManager', 'Initialized');
+    } catch (err) {
+      Logger.error('MicrophoneManager', 'Constructor failed', err);
     }
-    const webm = await this.stopRecordingIfRunning();
-    const buf = await webm.arrayBuffer();
-    const ac  = new AudioContext();
-    const audio = await ac.decodeAudioData(buf);
-    // stéréo attendu par lame -> dupliquer mono
-    const ch = audio.numberOfChannels>0 ? audio.getChannelData(0) : new Float32Array();
-    const pcm16 = this.#floatTo16BitPCM(ch);
-    const wavBlob = new Blob([this.#wavFromPCM16(pcm16, audio.sampleRate)], {type:'audio/wav'});
-    // lamejs depuis wav (simple & robuste)
-    const reader = new FileReader();
-    const arrayBuffer = await new Promise(r=>{ reader.onload = ()=>r(reader.result); reader.readAsArrayBuffer(wavBlob); });
-    const wavView = new DataView(arrayBuffer);
-    const pcmData = new Int16Array(arrayBuffer, 44); // après header WAV
-    const mp3enc = new lamejs.Mp3Encoder(1, audio.sampleRate, 128);
-    const mp3Data = [];
-    for (let i=0; i<pcmData.length; i+=1152){
-      const mono = pcmData.subarray(i, i+1152);
-      const mp3buf = mp3enc.encodeBuffer(mono);
-      if (mp3buf.length > 0) mp3Data.push(new Int8Array(mp3buf));
-    }
-    const end = mp3enc.flush(); if (end.length>0) mp3Data.push(new Int8Array(end));
-    return new Blob(mp3Data, {type:'audio/mpeg'});
   }
 
-  async stopRecordingIfRunning(){
-    if (this.#rec && this.#rec.state==='recording'){
-      return await this.stopRecording();
+  /**
+   * Demander l'accès au micro
+   */
+  async requestAccess() {
+    try {
+      Logger.info('MicrophoneManager', 'Requesting microphone access');
+      this.#state = 'requesting';
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('getUserMedia not supported');
+      }
+
+      this.#stream = await navigator.mediaDevices.getUserMedia(this.#constraints);
+      
+      Logger.info('MicrophoneManager', 'Microphone access granted', {
+        streamId: this.#stream.id,
+        tracks: this.#stream.getTracks().length,
+      });
+
+      this.#state = 'granted';
+      return true;
+    } catch (err) {
+      Logger.error('MicrophoneManager', 'Microphone access denied', err);
+      this.#state = 'denied';
+
+      if (this.#errorHandler) {
+        this.#errorHandler.captureError('MicrophoneAccess', err);
+      }
+
+      return false;
     }
-    // reconstruire blob courant si déjà stoppé
-    return new Blob(this.#chunks, { type: this.#rec?.mimeType || 'audio/webm' });
   }
 
-  // ——— helpers encodage
-  #floatTo16BitPCM(float32){
-    const out = new Int16Array(float32.length);
-    for (let i=0;i<float32.length;i++){
-      const s = Math.max(-1, Math.min(1, float32[i]));
-      out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+  /**
+   * Vérifier si accès disponible
+   */
+  isGranted() {
+    return this.#state === 'granted' && this.#stream !== null;
+  }
+
+  /**
+   * Obtenir le stream
+   */
+  getStream() {
+    try {
+      if (!this.isGranted()) {
+        throw new Error('Microphone not granted');
+      }
+      return this.#stream;
+    } catch (err) {
+      Logger.error('MicrophoneManager', 'getStream failed', err);
+      return null;
     }
-    return out;
   }
-  #wavFromPCM16(pcm16, sampleRate){
-    // header WAV minimal mono
-    const blockAlign = 2, byteRate = sampleRate*blockAlign;
-    const buffer = new ArrayBuffer(44 + pcm16.length*2);
-    const view = new DataView(buffer);
-    let p = 0;
-    const w = (s)=>{ view.setUint8(p++, s.charCodeAt(0)); };
-    "RIFF".split('').forEach(w);
-    view.setUint32(p, 36 + pcm16.length*2, true); p+=4;
-    "WAVEfmt ".split('').forEach(w);
-    view.setUint32(p,16,true); p+=4; view.setUint16(p,1,true); p+=2; view.setUint16(p,1,true); p+=2;
-    view.setUint32(p,sampleRate,true); p+=4; view.setUint32(p,byteRate,true); p+=4; view.setUint16(p,blockAlign,true); p+=2; view.setUint16(p,16,true); p+=2;
-    "data".split('').forEach(w);
-    view.setUint32(p, pcm16.length*2, true); p+=4;
-    for (let i=0;i<pcm16.length;i++,p+=2) view.setInt16(p, pcm16[i], true);
-    return view;
+
+  /**
+   * Créer une source audio depuis le stream
+   */
+  createSource() {
+    try {
+      if (!this.isGranted()) {
+        throw new Error('Microphone not granted');
+      }
+
+      if (!this.#engine || !this.#engine.isInitialized()) {
+        throw new Error('AudioEngine not initialized');
+      }
+
+      const audioContext = this.#engine.getContext();
+      this.#source = audioContext.createMediaStreamSource(this.#stream);
+
+      Logger.info('MicrophoneManager', 'Audio source created');
+      return this.#source;
+    } catch (err) {
+      Logger.error('MicrophoneManager', 'createSource failed', err);
+      return null;
+    }
   }
-  #encodeWav(audio){
-    const ch = audio.getChannelData(0);
-    const pcm16 = this.#floatTo16BitPCM(ch);
-    return this.#wavFromPCM16(pcm16, audio.sampleRate).buffer;
+
+  /**
+   * Obtenir la source audio
+   */
+  getSource() {
+    try {
+      if (!this.#source) {
+        return this.createSource();
+      }
+      return this.#source;
+    } catch (err) {
+      Logger.error('MicrophoneManager', 'getSource failed', err);
+      return null;
+    }
   }
-  #pickMimeType(){
-    const opts = ['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg'];
-    return opts.find(t=>MediaRecorder.isTypeSupported(t)) || '';
+
+  /**
+   * Arrêter le stream
+   */
+  stop() {
+    try {
+      if (this.#stream) {
+        this.#stream.getTracks().forEach(track => track.stop());
+        Logger.info('MicrophoneManager', 'Stream stopped');
+        this.#stream = null;
+        this.#source = null;
+        this.#state = 'stopped';
+      }
+    } catch (err) {
+      Logger.error('MicrophoneManager', 'stop failed', err);
+    }
   }
-  async #loadScript(src){ await new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=()=>rej(new Error('CDN MP3')); document.head.appendChild(s); }); }
+
+  /**
+   * Obtenir les dispositifs audio disponibles
+   */
+  async getAudioDevices() {
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+        throw new Error('enumerateDevices not supported');
+      }
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(device => device.kind === 'audioinput');
+
+      Logger.info('MicrophoneManager', 'Audio devices enumerated', {
+        count: audioInputs.length,
+      });
+
+      return audioInputs;
+    } catch (err) {
+      Logger.error('MicrophoneManager', 'getAudioDevices failed', err);
+      return [];
+    }
+  }
+
+  /**
+   * Changer de dispositif audio
+   */
+  async selectDevice(deviceId) {
+    try {
+      Logger.info('MicrophoneManager', 'Selecting device', { deviceId });
+
+      this.stop();
+
+      this.#constraints.audio.deviceId = deviceId;
+      return await this.requestAccess();
+    } catch (err) {
+      Logger.error('MicrophoneManager', 'selectDevice failed', err);
+      return false;
+    }
+  }
+
+  /**
+   * Obtenir le niveau du micro (amplitude actuelle)
+   */
+  getMicrophoneLevel() {
+    try {
+      if (!this.#source) {
+        return 0;
+      }
+
+      const audioContext = this.#engine.getContext();
+      const analyser = audioContext.createAnalyser();
+      this.#source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(dataArray);
+
+      const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+      return Math.round((average / 255) * 100);
+    } catch (err) {
+      Logger.debug('MicrophoneManager', 'getMicrophoneLevel failed', err);
+      return 0;
+    }
+  }
+
+  /**
+   * Obtenir l'état
+   */
+  getState() {
+    return {
+      state: this.#state,
+      isGranted: this.isGranted(),
+      hasStream: this.#stream !== null,
+      hasSource: this.#source !== null,
+    };
+  }
+
+  /**
+   * Configurer les contraintes
+   */
+  setConstraints(constraints) {
+    try {
+      this.#constraints = { ...this.#constraints, ...constraints };
+      Logger.info('MicrophoneManager', 'Constraints updated', this.#constraints);
+    } catch (err) {
+      Logger.error('MicrophoneManager', 'setConstraints failed', err);
+    }
+  }
+
+  /**
+   * Obtenir les contraintes actuelles
+   */
+  getConstraints() {
+    return { ...this.#constraints };
+  }
 }
+
+export { MicrophoneManager };
+export default MicrophoneManager;

@@ -1,22 +1,43 @@
 /**
  * pitchy-lite.js
- * TYPE: Library - Lightweight Pitch Detection
+ * TYPE: Library - Pitch Detection Wrapper (uses real Pitchy 4.1.0)
  * 
  * Responsabilités:
- * - Détection pitch temps réel (YIN algorithm)
- * - Conversion fréquence Hz
- * - Fallback robuste
- * 
- * Usage: const detector = new PitchyLite(sampleRate); detector.detect(floatArray)
- * Retour: Hz ou null
+ * - Wrapper autour de Pitchy.js du CDN
+ * - Détection pitch en temps réel
+ * - Interface simple avec fallback
  */
 
 class PitchyLite {
   constructor(sampleRate = 48000) {
     this.sampleRate = sampleRate;
-    this.threshold = 0.1;
+    this.threshold = 0.15;
     this.minFreq = 50;
     this.maxFreq = 2000;
+    this.detector = null;
+    this.initialized = false;
+    
+    this.init();
+  }
+
+  /**
+   * Initialiser le detector
+   */
+  init() {
+    try {
+      // Vérifier si Pitchy est disponible globalement
+      if (typeof Pitchy === 'undefined') {
+        console.warn('[PitchyLite] Pitchy not loaded from CDN yet');
+        return;
+      }
+
+      this.detector = Pitchy.PitchDetector.forFloat32Array(2048);
+      this.initialized = true;
+      console.log('[PitchyLite] Initialized with Pitchy 4.1.0');
+    } catch (err) {
+      console.error('[PitchyLite] Init failed:', err);
+      this.initialized = false;
+    }
   }
 
   /**
@@ -24,125 +45,30 @@ class PitchyLite {
    */
   detect(audioBuffer) {
     try {
-      if (!audioBuffer || audioBuffer.length < 512) {
+      if (!this.initialized) {
+        this.init();
+      }
+
+      if (!audioBuffer || audioBuffer.length < 512 || !this.detector) {
         return null;
       }
 
-      // Normaliser le buffer
-      const normalized = this.normalize(audioBuffer);
-      
-      // Vérifier silence
-      if (this.isSilent(normalized)) {
+      // Utiliser Pitchy réel
+      const [frequency, clarity] = this.detector.findPitch(audioBuffer);
+
+      // Filtrer par clarity (confiance)
+      if (clarity < this.threshold) {
         return null;
       }
 
-      // Algorithme YIN simplifié
-      const f0 = this.yinAlgorithm(normalized);
-      
-      // Vérifier range
-      if (f0 && f0 >= this.minFreq && f0 <= this.maxFreq) {
-        return f0;
+      // Filtrer par range
+      if (frequency < this.minFreq || frequency > this.maxFreq) {
+        return null;
       }
 
-      return null;
+      return frequency;
     } catch (err) {
       console.error('[PitchyLite] detect failed:', err);
-      return null;
-    }
-  }
-
-  /**
-   * Normaliser le buffer
-   */
-  normalize(buffer) {
-    try {
-      let max = 0;
-      for (let i = 0; i < buffer.length; i++) {
-        max = Math.max(max, Math.abs(buffer[i]));
-      }
-      
-      if (max === 0) {
-        return buffer;
-      }
-
-      const normalized = new Float32Array(buffer.length);
-      for (let i = 0; i < buffer.length; i++) {
-        normalized[i] = buffer[i] / max;
-      }
-      return normalized;
-    } catch (err) {
-      return buffer;
-    }
-  }
-
-  /**
-   * Vérifier si silence (RMS trop bas)
-   */
-  isSilent(buffer) {
-    try {
-      let sum = 0;
-      for (let i = 0; i < buffer.length; i++) {
-        sum += buffer[i] * buffer[i];
-      }
-      const rms = Math.sqrt(sum / buffer.length);
-      return rms < 0.01;
-    } catch (err) {
-      return true;
-    }
-  }
-
-  /**
-   * Algorithme YIN simplifié
-   */
-  yinAlgorithm(buffer) {
-    try {
-      const windowSize = Math.min(buffer.length, 4096);
-      const half = Math.floor(windowSize / 2);
-      
-      // Calcul autocorrelation
-      const autocorr = new Float32Array(half);
-      for (let lag = 0; lag < half; lag++) {
-        let sum = 0;
-        for (let i = 0; i < windowSize - lag; i++) {
-          sum += buffer[i] * buffer[i + lag];
-        }
-        autocorr[lag] = sum;
-      }
-
-      // Difference function
-      const diff = new Float32Array(half);
-      let cumsum = 0;
-      diff[0] = 0;
-      for (let lag = 1; lag < half; lag++) {
-        diff[lag] = autocorr[0] + autocorr[lag] - 2 * autocorr[lag];
-        cumsum += diff[lag];
-        if (cumsum !== 0) {
-          diff[lag] = diff[lag] * lag / cumsum;
-        }
-      }
-
-      // Trouver le minimum dans la difference function
-      let minDiff = Infinity;
-      let minLag = 0;
-      for (let lag = 2; lag < half; lag++) {
-        if (diff[lag] < minDiff) {
-          minDiff = diff[lag];
-          minLag = lag;
-        }
-        if (diff[lag] < this.threshold) {
-          break;
-        }
-      }
-
-      if (minDiff > this.threshold || minLag === 0) {
-        return null;
-      }
-
-      // Convertir lag en fréquence
-      const freq = this.sampleRate / minLag;
-      return freq;
-    } catch (err) {
-      console.error('[PitchyLite] YIN failed:', err);
       return null;
     }
   }
@@ -151,7 +77,7 @@ class PitchyLite {
    * Setter seuil de confiance
    */
   setThreshold(value) {
-    this.threshold = Math.max(0.01, Math.min(1, value));
+    this.threshold = Math.max(0, Math.min(1, value));
   }
 
   /**

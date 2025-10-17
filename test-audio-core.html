@@ -205,6 +205,12 @@ canvas {
   background: #261a06;
 }
 
+.badge.err {
+  color: #fecaca;
+  border-color: #7f1d1d;
+  background: #2a0f14;
+}
+
 .hint {
   color: var(--muted);
   font-size: 12px;
@@ -215,8 +221,7 @@ canvas {
   margin-left: auto;
 }
 
-input[type="file"],
-input[type="url"] {
+input[type="file"] {
   padding: 8px 12px;
   border: 1px solid #22304f;
   border-radius: 8px;
@@ -239,9 +244,22 @@ input[type="url"] {
   border-radius: 6px;
   padding: 6px 10px;
 }
+
+.debugInfo {
+  background: #0b1020;
+  border: 1px solid #22304f;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #cbd5e1;
+  margin-top: 8px;
+}
 </style>
 </head>
 <body>
+
+<!-- PITCHY CDN -->
+<script src="https://cdn.jsdelivr.net/npm/pitchy@4.1.0/dist/index.min.js"></script>
 
 <div class="wrap">
   <div class="h1">🎵 Test Audio Core — Enregistrement + Détection Pitch</div>
@@ -261,7 +279,7 @@ input[type="url"] {
       <button id="btnMonOn" class="btn">Moniteur ON</button>
     </div>
 
-    <span class="right badge warn" id="pitchyStatus">PitchyLite: chargement...</span>
+    <span class="right badge warn" id="pitchyStatus">Pitchy: chargement...</span>
   </div>
 
   <div class="cols">
@@ -271,6 +289,7 @@ input[type="url"] {
       <div class="canvasWrap">
         <canvas id="canvasRec" width="600" height="320"></canvas>
       </div>
+      <div class="debugInfo" id="debugRec">Détections: 0 | Points tracés: 0</div>
       <div class="controls">
         <button id="btnDownWebM" class="btn">⬇️ WebM</button>
         <button id="btnDownWAV" class="btn">🎧 WAV</button>
@@ -286,6 +305,7 @@ input[type="url"] {
       <div class="canvasWrap">
         <canvas id="canvasRef" width="600" height="320"></canvas>
       </div>
+      <div class="debugInfo" id="debugRef">Détections: 0 | Points tracés: 0</div>
       <div class="controls">
         <input type="file" id="fileUploadRef" accept="audio/*" class="btn" style="border:1px solid #22304f;padding:8px 12px;cursor:pointer" />
         <button id="btnClearRef" class="btn">🗑️ Effacer</button>
@@ -321,6 +341,13 @@ const log = (level, msg) => {
 
 log('INFO', 'Système démarré');
 
+// Vérifier que Pitchy est chargé
+if (typeof Pitchy !== 'undefined') {
+  log('INFO', 'Pitchy 4.1.0 disponible (CDN)');
+} else {
+  log('WARN', 'Pitchy pas encore chargé...');
+}
+
 /* ==================== DOM ==================== */
 const btnMic = document.getElementById('btnMic');
 const btnRecStart = document.getElementById('btnRecStart');
@@ -334,6 +361,9 @@ const canvasRec = document.getElementById('canvasRec');
 const ctxRec = canvasRec.getContext('2d');
 const canvasRef = document.getElementById('canvasRef');
 const ctxRef = canvasRef.getContext('2d');
+
+const debugRec = document.getElementById('debugRec');
+const debugRef = document.getElementById('debugRef');
 
 const btnDownWebM = document.getElementById('btnDownWebM');
 const btnDownWAV = document.getElementById('btnDownWAV');
@@ -362,9 +392,12 @@ let monitorOn = false;
 let detector = null;
 
 let recordedPitch = [];
-let refData = { pitch: [], duration: 0 };
+let recordDetectionCount = 0;
 
-/* ==================== CANVAS HELPERS ==================== */
+let refData = { pitch: [], duration: 0 };
+let refDetectionCount = 0;
+
+/* ==================== CANVAS SETUP ==================== */
 function drawCanvasRec() {
   const w = canvasRec.width;
   const h = canvasRec.height;
@@ -394,7 +427,7 @@ function drawCanvasRec() {
   ctxRec.lineTo(w, h - 40);
   ctxRec.stroke();
 
-  // Ligne médiane (0 cents / 440 Hz)
+  // Ligne médiane (0 cents)
   ctxRec.strokeStyle = '#22c55e';
   ctxRec.lineWidth = 2;
   ctxRec.beginPath();
@@ -402,7 +435,7 @@ function drawCanvasRec() {
   ctxRec.lineTo(w, h / 2);
   ctxRec.stroke();
 
-  // Labels côté gauche (cents)
+  // Labels gauche
   ctxRec.fillStyle = '#9ca3af';
   ctxRec.font = 'bold 11px monospace';
   ctxRec.textAlign = 'right';
@@ -412,13 +445,13 @@ function drawCanvasRec() {
   ctxRec.fillText('Aigu', 55, h / 2 + 80);
   ctxRec.fillText('Très aigu', 55, h - 10);
 
-  // Labels bas (temps)
+  // Labels bas
   ctxRec.textAlign = 'center';
   ctxRec.fillText('0s', 60, h - 20);
-  ctxRec.fillText('60s', w - 10, h - 20);
+  ctxRec.fillText('60s', (w + 60) / 2, h - 20);
   ctxRec.fillText('120s', w, h - 20);
 
-  // Graduations axe Y (cents)
+  // Graduations
   ctxRec.strokeStyle = '#1a2642';
   ctxRec.lineWidth = 1;
   for (let cents = -300; cents <= 300; cents += 100) {
@@ -525,7 +558,7 @@ function initDetector() {
 
   detector = new PitchyLite(audioCtx.sampleRate);
   log('INFO', 'Détecteur pitch initialisé');
-  pitchyStatus.textContent = 'PitchyLite: OK';
+  pitchyStatus.textContent = 'Pitchy: OK';
   pitchyStatus.className = 'badge ok';
   return true;
 }
@@ -550,6 +583,7 @@ function startRecording() {
   chunks = [];
   lastBlob = null;
   recordedPitch = [];
+  recordDetectionCount = 0;
   recStart = audioCtx.currentTime;
 
   const options = {
@@ -600,31 +634,23 @@ function startMonitor() {
   if (rafId) return;
 
   const buf = new Float32Array(analyser.fftSize);
-  const windowSize = 50;
-  let pitchWindow = [];
 
   function tick() {
     drawCanvasRec();
 
     analyser.getFloatTimeDomainData(buf);
-    let hz = detector.detect(buf);
+    const hz = detector.detect(buf);
 
     if (hz) {
-      pitchWindow.push(hz);
-      if (pitchWindow.length > windowSize) {
-        pitchWindow.shift();
-      }
-
-      // Moyenne de la fenêtre
-      const avgHz = pitchWindow.reduce((a, b) => a + b, 0) / pitchWindow.length;
-      const cents = hzToCents(avgHz, 440);
+      recordDetectionCount++;
+      const cents = hzToCents(hz, 440);
       const elapsed = audioCtx.currentTime - recStart;
       const x = 60 + (canvasRec.width - 80) * Math.min(elapsed / 120, 1);
       const y = mapCentsToY(cents, canvasRec.height);
 
-      recordedPitch.push({ t: elapsed, hz: avgHz, cents, x, y });
+      recordedPitch.push({ t: elapsed, hz, cents, x, y });
 
-      // Dessiner courbe
+      // Tracer courbe
       if (recordedPitch.length > 1) {
         const prev = recordedPitch[recordedPitch.length - 2];
         ctxRec.strokeStyle = '#3b82f6';
@@ -638,9 +664,11 @@ function startMonitor() {
       // Point
       ctxRec.fillStyle = '#3b82f6';
       ctxRec.beginPath();
-      ctxRec.arc(x, y, 3, 0, Math.PI * 2);
+      ctxRec.arc(x, y, 2.5, 0, Math.PI * 2);
       ctxRec.fill();
     }
+
+    debugRec.textContent = `Détections: ${recordDetectionCount} | Points tracés: ${recordedPitch.length}`;
 
     if (monitorOn || (mediaRecorder && mediaRecorder.state === 'recording')) {
       rafId = requestAnimationFrame(tick);
@@ -692,11 +720,9 @@ btnDownMP3.onclick = async () => {
   try {
     const wav = await WAVExport.fromWebM(lastBlob);
     if (!wav) return log('ERROR', 'Conversion WAV échouée');
-
     log('INFO', 'Encodage MP3 en cours...');
     const mp3 = await MP3Export.fromWav(wav);
     if (!mp3) return log('ERROR', 'Conversion MP3 échouée');
-
     downloadBlob(mp3, 'take.mp3');
   } catch (err) {
     log('ERROR', 'MP3: ' + err.message);
@@ -707,8 +733,10 @@ btnClearRec.onclick = () => {
   chunks = [];
   lastBlob = null;
   recordedPitch = [];
+  recordDetectionCount = 0;
   updateTimer(0);
   drawCanvasRec();
+  debugRec.textContent = 'Détections: 0 | Points tracés: 0';
   log('INFO', 'Enregistrement effacé');
 };
 
@@ -738,9 +766,10 @@ fileUploadRef.addEventListener('change', async (e) => {
     const audio = await audioCtx.decodeAudioData(buf);
     const ch = audio.getChannelData(0);
     refData.duration = audio.duration;
+    refDetectionCount = 0;
     refData.pitch = extractPitch(ch, audio.sampleRate);
     drawReferenceData();
-    log('INFO', `Référence chargée: ${file.name}`);
+    log('INFO', `Référence chargée: ${file.name} (${audio.duration.toFixed(1)}s)`);
   } catch (err) {
     log('ERROR', 'Upload ref: ' + err.message);
   }
@@ -748,7 +777,9 @@ fileUploadRef.addEventListener('change', async (e) => {
 
 btnClearRef.onclick = () => {
   refData = { pitch: [], duration: 0 };
+  refDetectionCount = 0;
   drawCanvasRef();
+  debugRef.textContent = 'Détections: 0 | Points tracés: 0';
   log('INFO', 'Référence effacée');
 };
 
@@ -759,17 +790,20 @@ function extractPitch(samples, sr) {
   const result = [];
   const win = 2048;
   const hop = 512;
+  let detectionCount = 0;
 
   for (let i = 0; i + win <= samples.length; i += hop) {
     const slice = samples.subarray(i, i + win);
     const hz = detector.detect(slice);
     if (hz) {
+      detectionCount++;
       const t = i / sr;
       const cents = hzToCents(hz, 440);
       result.push({ t, hz, cents });
     }
   }
 
+  refDetectionCount = detectionCount;
   return result;
 }
 
@@ -777,7 +811,10 @@ function extractPitch(samples, sr) {
 function drawReferenceData() {
   drawCanvasRef();
 
-  if (refData.pitch.length === 0) return;
+  if (refData.pitch.length === 0) {
+    debugRef.textContent = 'Détections: 0 | Points tracés: 0';
+    return;
+  }
 
   const w = canvasRef.width;
   const h = canvasRef.height;
@@ -800,6 +837,8 @@ function drawReferenceData() {
   }
 
   ctxRef.stroke();
+
+  debugRef.textContent = `Détections: ${refDetectionCount} | Points tracés: ${refData.pitch.length}`;
 
   // Stats
   if (refData.pitch.length > 0) {

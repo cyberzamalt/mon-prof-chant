@@ -1,338 +1,245 @@
 /**
  * AudioBus.js
- * TYPE: Event System (Pub/Sub)
+ * TYPE: Event System - Publish-Subscribe for Audio Events
  * 
  * Responsabilités:
- * - Communication découplée entre modules
- * - Pattern Pub/Sub avec priorités
- * - Synchronisation avec AudioContext.currentTime
- * - Gestion d'événements audio
+ * - Système événements pour modules audio
+ * - Publish-subscribe pattern
+ * - Gestion asynchrone événements
+ * - Fallback robuste
  * 
  * Dépendances: Logger
+ * Utilisé par: PitchDetector, RecorderService, app.js
  */
 
-import { Logger } from '../../logging/Logger.js';
+import { Logger } from '../logging/Logger.js';
 
-export class AudioBus {
-  
-  // Map des souscriptions: eventName → Array<{callback, priority}>
+class AudioBus {
   #subscribers = new Map();
-  
-  // AudioContext (optionnel, pour timestamps audio)
-  #audioContext = null;
-  
-  // Statistiques
-  #stats = {
-    totalEvents: 0,
-    eventCounts: {},
-  };
+  #eventHistory = [];
+  #maxHistory = 100;
+  #isProcessing = false;
+  #eventQueue = [];
 
   /**
    * Constructeur
-   * @param {AudioContext} audioContext - Contexte audio (optionnel)
    */
   constructor(audioContext = null) {
-    this.#audioContext = audioContext;
-    
-    Logger.info('AudioBus', 'Initialized', {
-      hasAudioContext: !!audioContext,
-    });
-  }
-
-  /**
-   * Injecte ou met à jour l'AudioContext
-   * @param {AudioContext} audioContext
-   */
-  setAudioContext(audioContext) {
-    this.#audioContext = audioContext;
-    Logger.debug('AudioBus', 'AudioContext injected');
-  }
-
-  /**
-   * Subscribe à un événement
-   * @param {string} eventName - Nom de l'événement
-   * @param {function} callback - Fonction callback(data, audioTime)
-   * @param {number} priority - Priorité (plus haut = appelé en premier), défaut: 0
-   * @returns {function} Fonction de désinscription
-   */
-  on(eventName, callback, priority = 0) {
     try {
-      if (!eventName || typeof eventName !== 'string') {
-        Logger.warn('AudioBus', 'Invalid event name', { eventName });
-        return () => {};
+      Logger.info('AudioBus', 'Initialized');
+    } catch (err) {
+      console.error('[AudioBus] Constructor failed:', err);
+    }
+  }
+
+  /**
+   * S'abonner à un événement
+   */
+  on(eventName, callback) {
+    try {
+      if (!eventName || typeof callback !== 'function') {
+        throw new Error('Invalid event name or callback');
       }
 
-      if (typeof callback !== 'function') {
-        Logger.warn('AudioBus', 'Invalid callback', { eventName });
-        return () => {};
-      }
-
-      // Créer le tableau si premier subscriber
       if (!this.#subscribers.has(eventName)) {
-        this.#subscribers.set(eventName, []);
+        this.#subscribers.set(eventName, new Set());
       }
 
-      // Ajouter le subscriber
-      const subscriber = { callback, priority };
-      this.#subscribers.get(eventName).push(subscriber);
+      this.#subscribers.get(eventName).add(callback);
+      Logger.debug('AudioBus', `Listener added for ${eventName}`);
 
-      // Trier par priorité décroissante
-      this.#subscribers.get(eventName).sort((a, b) => b.priority - a.priority);
-
-      Logger.debug('AudioBus', `Subscribed to "${eventName}"`, { 
-        priority,
-        totalSubscribers: this.#subscribers.get(eventName).length,
-      });
-
-      // Retourner fonction de désinscription
-      return () => this.off(eventName, callback);
-
-    } catch (error) {
-      Logger.error('AudioBus', 'Subscribe failed', error);
+      // Retourner fonction de désabonnement
+      return () => {
+        this.#subscribers.get(eventName).delete(callback);
+        Logger.debug('AudioBus', `Listener removed for ${eventName}`);
+      };
+    } catch (err) {
+      Logger.error('AudioBus', 'on failed', err);
       return () => {};
     }
   }
 
   /**
-   * Unsubscribe d'un événement
-   * @param {string} eventName - Nom de l'événement
-   * @param {function} callback - Fonction callback à retirer
+   * S'abonner une seule fois
    */
-  off(eventName, callback) {
+  once(eventName, callback) {
     try {
-      if (!this.#subscribers.has(eventName)) {
-        Logger.debug('AudioBus', `No subscribers for "${eventName}"`);
-        return;
-      }
-
-      const subscribers = this.#subscribers.get(eventName);
-      const initialLength = subscribers.length;
-
-      // Filtrer pour retirer le callback
-      const filtered = subscribers.filter(sub => sub.callback !== callback);
-      
-      this.#subscribers.set(eventName, filtered);
-
-      // Si plus de subscribers, supprimer la clé
-      if (filtered.length === 0) {
-        this.#subscribers.delete(eventName);
-      }
-
-      Logger.debug('AudioBus', `Unsubscribed from "${eventName}"`, {
-        removed: initialLength - filtered.length,
-        remaining: filtered.length,
+      const unsubscribe = this.on(eventName, (data) => {
+        callback(data);
+        unsubscribe();
       });
-
-    } catch (error) {
-      Logger.error('AudioBus', 'Unsubscribe failed', error);
+      return unsubscribe;
+    } catch (err) {
+      Logger.error('AudioBus', 'once failed', err);
+      return () => {};
     }
   }
 
   /**
-   * Émet un événement
-   * @param {string} eventName - Nom de l'événement
-   * @param {*} data - Données à transmettre
-   * @param {number} audioTime - Temps audio (optionnel)
+   * Émettre un événement
    */
-  emit(eventName, data = null, audioTime = null) {
+  emit(eventName, data = null) {
     try {
-      // Utiliser audioContext.currentTime si disponible
-      const time = audioTime || this.#audioContext?.currentTime || null;
+      if (!eventName) {
+        throw new Error('Event name required');
+      }
 
-      Logger.debug('AudioBus', `Emitting "${eventName}"`, { 
-        hasData: data !== null,
-        audioTime: time,
-      });
+      const event = {
+        name: eventName,
+        data: data,
+        timestamp: new Date().toISOString(),
+      };
 
-      // Incrémenter stats
-      this.#stats.totalEvents++;
-      this.#stats.eventCounts[eventName] = (this.#stats.eventCounts[eventName] || 0) + 1;
+      // Ajouter à l'historique
+      this.#eventHistory.push(event);
+      if (this.#eventHistory.length > this.#maxHistory) {
+        this.#eventHistory = this.#eventHistory.slice(-this.#maxHistory);
+      }
 
-      // Récupérer subscribers
-      const subscribers = this.#subscribers.get(eventName);
-
-      if (!subscribers || subscribers.length === 0) {
-        Logger.debug('AudioBus', `No subscribers for "${eventName}"`);
+      // Ajouter à la queue si en cours de traitement
+      if (this.#isProcessing) {
+        this.#eventQueue.push(event);
         return;
       }
 
-      // Appeler chaque callback
-      let successCount = 0;
-      let errorCount = 0;
-
-      for (const { callback } of subscribers) {
-        try {
-          callback(data, time);
-          successCount++;
-        } catch (error) {
-          errorCount++;
-          Logger.error('AudioBus', `Error in "${eventName}" subscriber`, {
-            error: error.message,
-            stack: error.stack,
-          });
-        }
-      }
-
-      Logger.debug('AudioBus', `Event "${eventName}" processed`, {
-        success: successCount,
-        errors: errorCount,
-      });
-
-    } catch (error) {
-      Logger.error('AudioBus', 'Emit failed', error);
+      // Traiter immédiatement
+      this.#processEvent(event);
+    } catch (err) {
+      Logger.error('AudioBus', `emit ${eventName} failed`, err);
     }
   }
 
   /**
-   * Subscribe une seule fois (auto-unsubscribe après premier appel)
-   * @param {string} eventName
-   * @param {function} callback
-   * @param {number} priority
-   * @returns {function} Fonction de désinscription
+   * Traiter un événement
    */
-  once(eventName, callback, priority = 0) {
-    const wrappedCallback = (data, time) => {
-      callback(data, time);
-      this.off(eventName, wrappedCallback);
-    };
+  #processEvent(event) {
+    try {
+      this.#isProcessing = true;
 
-    return this.on(eventName, wrappedCallback, priority);
+      const listeners = this.#subscribers.get(event.name);
+      if (listeners && listeners.size > 0) {
+        listeners.forEach(callback => {
+          try {
+            callback(event.data);
+          } catch (err) {
+            Logger.error('AudioBus', `Listener callback failed for ${event.name}`, err);
+          }
+        });
+      }
+
+      this.#isProcessing = false;
+
+      // Traiter la queue s'il y a d'autres événements
+      if (this.#eventQueue.length > 0) {
+        const nextEvent = this.#eventQueue.shift();
+        this.#processEvent(nextEvent);
+      }
+    } catch (err) {
+      Logger.error('AudioBus', 'processEvent failed', err);
+      this.#isProcessing = false;
+    }
   }
 
   /**
-   * Efface tous les subscribers d'un événement
-   * @param {string} eventName - Nom de l'événement (si null, efface tout)
+   * Émettre un événement de manière asynchrone
    */
-  clear(eventName = null) {
+  async emitAsync(eventName, data = null) {
+    try {
+      return new Promise((resolve) => {
+        this.emit(eventName, data);
+        resolve(true);
+      });
+    } catch (err) {
+      Logger.error('AudioBus', `emitAsync ${eventName} failed`, err);
+      return false;
+    }
+  }
+
+  /**
+   * Obtenir tous les abonnés d'un événement
+   */
+  getSubscribers(eventName) {
+    try {
+      const listeners = this.#subscribers.get(eventName);
+      return listeners ? listeners.size : 0;
+    } catch (err) {
+      Logger.error('AudioBus', 'getSubscribers failed', err);
+      return 0;
+    }
+  }
+
+  /**
+   * Obtenir l'historique événements
+   */
+  getHistory(eventName = null) {
     try {
       if (eventName) {
-        // Effacer un événement spécifique
-        const count = this.#subscribers.get(eventName)?.length || 0;
-        this.#subscribers.delete(eventName);
-        
-        Logger.info('AudioBus', `Cleared subscribers for "${eventName}"`, { count });
-      } else {
-        // Effacer tous les événements
-        const totalCount = Array.from(this.#subscribers.values())
-          .reduce((sum, subs) => sum + subs.length, 0);
-        
-        this.#subscribers.clear();
-        
-        Logger.info('AudioBus', 'Cleared ALL subscribers', { count: totalCount });
+        return this.#eventHistory.filter(e => e.name === eventName);
       }
-
-    } catch (error) {
-      Logger.error('AudioBus', 'Clear failed', error);
+      return [...this.#eventHistory];
+    } catch (err) {
+      Logger.error('AudioBus', 'getHistory failed', err);
+      return [];
     }
   }
 
   /**
-   * Récupère le nombre de subscribers pour un événement
-   * @param {string} eventName
-   * @returns {number}
+   * Nettoyer l'historique
    */
-  getSubscriberCount(eventName) {
-    return this.#subscribers.get(eventName)?.length || 0;
+  clearHistory() {
+    try {
+      this.#eventHistory = [];
+      Logger.info('AudioBus', 'History cleared');
+    } catch (err) {
+      Logger.error('AudioBus', 'clearHistory failed', err);
+    }
   }
 
   /**
-   * Récupère tous les noms d'événements enregistrés
-   * @returns {Array<string>}
+   * Désabonner tous les listeners d'un événement
    */
-  getEventNames() {
-    return Array.from(this.#subscribers.keys());
-  }
-
-  /**
-   * Vérifie si un événement a des subscribers
-   * @param {string} eventName
-   * @returns {boolean}
-   */
-  hasSubscribers(eventName) {
-    return this.#subscribers.has(eventName) && this.#subscribers.get(eventName).length > 0;
-  }
-
-  /**
-   * Récupère les statistiques
-   * @returns {object}
-   */
-  getStats() {
-    return {
-      totalEvents: this.#stats.totalEvents,
-      eventCounts: { ...this.#stats.eventCounts },
-      registeredEvents: this.#subscribers.size,
-      totalSubscribers: Array.from(this.#subscribers.values())
-        .reduce((sum, subs) => sum + subs.length, 0),
-    };
-  }
-
-  /**
-   * Reset les statistiques
-   */
-  resetStats() {
-    this.#stats.totalEvents = 0;
-    this.#stats.eventCounts = {};
-    Logger.debug('AudioBus', 'Stats reset');
-  }
-
-  /**
-   * Affiche un rapport dans la console
-   */
-  logStatus() {
-    Logger.group('AudioBus Status', () => {
-      const stats = this.getStats();
-      
-      Logger.info('AudioBus', 'Total Events Emitted', stats.totalEvents);
-      Logger.info('AudioBus', 'Registered Events', stats.registeredEvents);
-      Logger.info('AudioBus', 'Total Subscribers', stats.totalSubscribers);
-      
-      if (Object.keys(stats.eventCounts).length > 0) {
-        Logger.info('AudioBus', 'Event Counts', stats.eventCounts);
+  off(eventName) {
+    try {
+      if (this.#subscribers.has(eventName)) {
+        this.#subscribers.delete(eventName);
+        Logger.info('AudioBus', `All listeners removed for ${eventName}`);
       }
-
-      Logger.info('AudioBus', 'Event Names', this.getEventNames());
-    });
+    } catch (err) {
+      Logger.error('AudioBus', 'off failed', err);
+    }
   }
 
   /**
-   * Crée un namespace pour grouper des événements
-   * @param {string} namespace - Préfixe pour les événements
-   * @returns {object} API avec on/emit préfixés
+   * Désabonner tous les listeners de tous les événements
    */
-  namespace(namespace) {
-    return {
-      on: (eventName, callback, priority) => 
-        this.on(`${namespace}:${eventName}`, callback, priority),
-      
-      off: (eventName, callback) => 
-        this.off(`${namespace}:${eventName}`, callback),
-      
-      emit: (eventName, data, audioTime) => 
-        this.emit(`${namespace}:${eventName}`, data, audioTime),
-      
-      once: (eventName, callback, priority) => 
-        this.once(`${namespace}:${eventName}`, callback, priority),
-      
-      clear: () => {
-        const events = this.getEventNames().filter(name => name.startsWith(`${namespace}:`));
-        events.forEach(event => this.clear(event));
-      },
-    };
+  offAll() {
+    try {
+      this.#subscribers.clear();
+      Logger.info('AudioBus', 'All listeners removed');
+    } catch (err) {
+      Logger.error('AudioBus', 'offAll failed', err);
+    }
   }
 
   /**
-   * Détruit le bus (cleanup)
+   * Obtenir rapport
    */
-  destroy() {
-    Logger.info('AudioBus', 'Destroying...');
-    
-    this.clear(); // Effacer tous les subscribers
-    this.#audioContext = null;
-    this.resetStats();
-    
-    Logger.info('AudioBus', 'Destroyed');
+  getStatus() {
+    try {
+      const eventNames = Array.from(this.#subscribers.keys());
+      return {
+        eventsMonitored: eventNames,
+        totalListeners: Array.from(this.#subscribers.values()).reduce((sum, set) => sum + set.size, 0),
+        historySize: this.#eventHistory.length,
+        isProcessing: this.#isProcessing,
+        queueSize: this.#eventQueue.length,
+      };
+    } catch (err) {
+      Logger.error('AudioBus', 'getStatus failed', err);
+      return {};
+    }
   }
 }
 
-// Export par défaut
+export { AudioBus };
 export default AudioBus;

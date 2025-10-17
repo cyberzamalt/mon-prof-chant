@@ -1,358 +1,295 @@
 /**
  * NoteFrequencies.js
- * TYPE: Data - Frequency Table
+ * TYPE: Data - Frequency Lookup Tables
  * 
  * Responsabilités:
- * - Table complète des fréquences MIDI (0-127)
- * - Mapping notes → fréquences
- * - Recherche de la note la plus proche d'une fréquence
- * - Support noms français et anglais
+ * - Mappages notes ↔ fréquences
+ * - Tables de référence complètes
+ * - Support A0 à C8 (88 touches piano)
  * 
- * Dépendances: Logger, AudioMath
+ * Dépendances: AUCUNE
+ * Utilisé par: AudioMath, CentsCalculator, PitchDetector
  */
 
-import { Logger } from '../logging/Logger.js';
-import { AudioMath } from './AudioMath.js';
-
-export class NoteFrequencies {
-  
-  // Table complète générée à l'initialisation
-  static #frequencyTable = null;
-  static #noteNameTable = null;
+class NoteFrequencies {
+  /**
+   * Tableau complet des fréquences (A0 à C8)
+   */
+  static FREQUENCIES = {
+    'A0': 27.5,
+    'A#0': 29.13,
+    'B0': 30.87,
+    'C1': 32.7,
+    'C#1': 34.65,
+    'D1': 36.71,
+    'D#1': 38.89,
+    'E1': 41.2,
+    'F1': 43.65,
+    'F#1': 46.25,
+    'G1': 49.0,
+    'G#1': 51.96,
+    'A1': 55.0,
+    'A#1': 58.27,
+    'B1': 61.74,
+    'C2': 65.41,
+    'C#2': 69.3,
+    'D2': 73.42,
+    'D#2': 77.78,
+    'E2': 82.41,
+    'F2': 87.31,
+    'F#2': 92.5,
+    'G2': 98.0,
+    'G#2': 103.83,
+    'A2': 110.0,
+    'A#2': 116.54,
+    'B2': 123.47,
+    'C3': 130.81,
+    'C#3': 138.59,
+    'D3': 146.83,
+    'D#3': 155.56,
+    'E3': 164.81,
+    'F3': 174.61,
+    'F#3': 185.0,
+    'G3': 196.0,
+    'G#3': 207.65,
+    'A3': 220.0,
+    'A#3': 233.08,
+    'B3': 246.94,
+    'C4': 261.63,
+    'C#4': 277.18,
+    'D4': 293.66,
+    'D#4': 311.13,
+    'E4': 329.63,
+    'F4': 349.23,
+    'F#4': 369.99,
+    'G4': 392.0,
+    'G#4': 415.3,
+    'A4': 440.0,
+    'A#4': 466.16,
+    'B4': 493.88,
+    'C5': 523.25,
+    'C#5': 554.37,
+    'D5': 587.33,
+    'D#5': 622.25,
+    'E5': 659.25,
+    'F5': 698.46,
+    'F#5': 739.99,
+    'G5': 783.99,
+    'G#5': 830.61,
+    'A5': 880.0,
+    'A#5': 932.33,
+    'B5': 987.77,
+    'C6': 1046.5,
+    'C#6': 1108.73,
+    'D6': 1174.66,
+    'D#6': 1244.51,
+    'E6': 1318.51,
+    'F6': 1396.91,
+    'F#6': 1479.98,
+    'G6': 1567.98,
+    'G#6': 1661.22,
+    'A6': 1760.0,
+    'A#6': 1864.66,
+    'B6': 1975.53,
+    'C7': 2093.0,
+    'C#7': 2217.46,
+    'D7': 2349.32,
+    'D#7': 2489.02,
+    'E7': 2637.02,
+    'F7': 2793.83,
+    'F#7': 2959.96,
+    'G7': 3135.96,
+    'G#7': 3322.44,
+    'A7': 3520.0,
+    'A#7': 3729.31,
+    'B7': 3951.07,
+    'C8': 4186.01,
+  };
 
   /**
-   * Initialise les tables (appelé automatiquement)
+   * Inverse: fréquence → note (arrondi)
    */
-  static #initialize() {
-    if (NoteFrequencies.#frequencyTable) {
-      return; // Déjà initialisé
-    }
+  static FREQUENCY_MAP = null;
 
-    try {
-      Logger.debug('NoteFrequencies', 'Initializing frequency tables...');
-
-      NoteFrequencies.#frequencyTable = {};
-      NoteFrequencies.#noteNameTable = {};
-
-      // Générer toutes les notes MIDI (0-127)
-      for (let midi = 0; midi <= 127; midi++) {
-        const frequency = AudioMath.midiToFrequency(midi);
-        const noteName = AudioMath.midiToNoteName(midi);
-
-        if (frequency && noteName) {
-          NoteFrequencies.#frequencyTable[noteName] = frequency;
-          NoteFrequencies.#noteNameTable[midi] = noteName;
-        }
-      }
-
-      Logger.info('NoteFrequencies', 'Tables initialized', {
-        notes: Object.keys(NoteFrequencies.#frequencyTable).length
+  /**
+   * Initialiser la map inverse
+   */
+  static initFrequencyMap() {
+    if (!NoteFrequencies.FREQUENCY_MAP) {
+      NoteFrequencies.FREQUENCY_MAP = new Map();
+      Object.entries(NoteFrequencies.FREQUENCIES).forEach(([note, freq]) => {
+        NoteFrequencies.FREQUENCY_MAP.set(Math.round(freq * 100), note);
       });
-
-    } catch (error) {
-      Logger.error('NoteFrequencies', 'Initialization failed', error);
     }
   }
 
   /**
-   * Récupère la fréquence d'une note
-   * @param {string} noteName - Nom de la note (ex: "A4", "C#5")
-   * @returns {number|null} Fréquence en Hz, ou null si note invalide
+   * Obtenir la fréquence d'une note
    */
   static getFrequency(noteName) {
-    NoteFrequencies.#initialize();
-
     try {
-      if (!noteName || typeof noteName !== 'string') {
-        Logger.warn('NoteFrequencies', 'Invalid note name', { noteName });
-        return null;
-      }
-
-      // Normaliser (majuscule)
-      const normalized = noteName.toUpperCase();
-
-      const frequency = NoteFrequencies.#frequencyTable[normalized];
-
-      if (!frequency) {
-        Logger.debug('NoteFrequencies', 'Note not found', { noteName: normalized });
-        return null;
-      }
-
-      return frequency;
-
-    } catch (error) {
-      Logger.error('NoteFrequencies', 'getFrequency failed', error);
+      return NoteFrequencies.FREQUENCIES[noteName] || null;
+    } catch (err) {
       return null;
     }
   }
 
   /**
-   * Récupère le nom de la note la plus proche d'une fréquence
-   * @param {number} frequency - Fréquence en Hz
-   * @returns {object|null} { note, frequency, cents } ou null
-   */
-  static getClosestNote(frequency) {
-    NoteFrequencies.#initialize();
-
-    try {
-      if (!frequency || frequency <= 0) {
-        Logger.warn('NoteFrequencies', 'Invalid frequency', { frequency });
-        return null;
-      }
-
-      // Convertir en MIDI
-      const midi = AudioMath.frequencyToMidi(frequency);
-      if (midi === null) {
-        Logger.debug('NoteFrequencies', 'Frequency out of MIDI range', { frequency });
-        return null;
-      }
-
-      // Récupérer nom et fréquence cible
-      const noteName = NoteFrequencies.#noteNameTable[midi];
-      const targetFrequency = AudioMath.midiToFrequency(midi);
-
-      if (!noteName || !targetFrequency) {
-        return null;
-      }
-
-      // Calculer déviation en cents
-      const cents = AudioMath.calculateCents(frequency, targetFrequency);
-
-      return {
-        note: noteName,
-        frequency: targetFrequency,
-        cents: cents,
-        midi: midi,
-      };
-
-    } catch (error) {
-      Logger.error('NoteFrequencies', 'getClosestNote failed', error);
-      return null;
-    }
-  }
-
-  /**
-   * Récupère toutes les notes d'une octave
-   * @param {number} octave - Numéro d'octave (0-10)
-   * @returns {Array<object>} Tableau de { note, frequency }
-   */
-  static getOctave(octave) {
-    NoteFrequencies.#initialize();
-
-    try {
-      if (typeof octave !== 'number' || octave < 0 || octave > 10) {
-        Logger.warn('NoteFrequencies', 'Invalid octave', { octave });
-        return [];
-      }
-
-      const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-      const notes = [];
-
-      for (const name of noteNames) {
-        const fullName = `${name}${octave}`;
-        const frequency = NoteFrequencies.getFrequency(fullName);
-        
-        if (frequency) {
-          notes.push({
-            note: fullName,
-            frequency: frequency,
-          });
-        }
-      }
-
-      return notes;
-
-    } catch (error) {
-      Logger.error('NoteFrequencies', 'getOctave failed', error);
-      return [];
-    }
-  }
-
-  /**
-   * Récupère une plage de notes
-   * @param {string} startNote - Note de départ (ex: "C3")
-   * @param {string} endNote - Note de fin (ex: "C5")
-   * @returns {Array<object>} Tableau de { note, frequency }
-   */
-  static getRange(startNote, endNote) {
-    NoteFrequencies.#initialize();
-
-    try {
-      const startFreq = NoteFrequencies.getFrequency(startNote);
-      const endFreq = NoteFrequencies.getFrequency(endNote);
-
-      if (!startFreq || !endFreq) {
-        Logger.warn('NoteFrequencies', 'Invalid note range', { startNote, endNote });
-        return [];
-      }
-
-      const startMidi = AudioMath.frequencyToMidi(startFreq);
-      const endMidi = AudioMath.frequencyToMidi(endFreq);
-
-      if (startMidi === null || endMidi === null) {
-        return [];
-      }
-
-      const notes = [];
-      const [minMidi, maxMidi] = startMidi <= endMidi 
-        ? [startMidi, endMidi] 
-        : [endMidi, startMidi];
-
-      for (let midi = minMidi; midi <= maxMidi; midi++) {
-        const noteName = NoteFrequencies.#noteNameTable[midi];
-        const frequency = AudioMath.midiToFrequency(midi);
-
-        if (noteName && frequency) {
-          notes.push({
-            note: noteName,
-            frequency: frequency,
-            midi: midi,
-          });
-        }
-      }
-
-      return notes;
-
-    } catch (error) {
-      Logger.error('NoteFrequencies', 'getRange failed', error);
-      return [];
-    }
-  }
-
-  /**
-   * Vérifie si une note existe
-   * @param {string} noteName - Nom de la note
-   * @returns {boolean}
-   */
-  static exists(noteName) {
-    return NoteFrequencies.getFrequency(noteName) !== null;
-  }
-
-  /**
-   * Récupère toutes les notes disponibles
-   * @returns {Array<string>} Liste des noms de notes
+   * Obtenir toutes les notes
    */
   static getAllNotes() {
-    NoteFrequencies.#initialize();
-    return Object.keys(NoteFrequencies.#frequencyTable);
-  }
-
-  /**
-   * Récupère la table complète (pour debug)
-   * @returns {object} Table note → fréquence
-   */
-  static getTable() {
-    NoteFrequencies.#initialize();
-    return { ...NoteFrequencies.#frequencyTable };
-  }
-
-  /**
-   * Conversion nom français → anglais
-   * @param {string} frenchNote - Note en français (ex: "Do4", "Ré#5")
-   * @returns {string|null} Note en anglais (ex: "C4", "D#5")
-   */
-  static frenchToEnglish(frenchNote) {
     try {
-      const mapping = {
-        'Do': 'C',
-        'Ré': 'D',
-        'Mi': 'E',
-        'Fa': 'F',
-        'Sol': 'G',
-        'La': 'A',
-        'Si': 'B',
-      };
+      return Object.keys(NoteFrequencies.FREQUENCIES);
+    } catch (err) {
+      return [];
+    }
+  }
 
-      let englishNote = frenchNote;
+  /**
+   * Obtenir les notes d'une octave
+   */
+  static getNotesInOctave(octave) {
+    try {
+      const regex = new RegExp(`[A-G]#?${octave}$`);
+      return Object.keys(NoteFrequencies.FREQUENCIES).filter(note => regex.test(note));
+    } catch (err) {
+      return [];
+    }
+  }
 
-      for (const [fr, en] of Object.entries(mapping)) {
-        englishNote = englishNote.replace(fr, en);
+  /**
+   * Trouver la note la plus proche d'une fréquence
+   */
+  static findNearestNote(frequencyHz) {
+    try {
+      let nearest = null;
+      let minDiff = Infinity;
+
+      Object.entries(NoteFrequencies.FREQUENCIES).forEach(([note, freq]) => {
+        const diff = Math.abs(freq - frequencyHz);
+        if (diff < minDiff) {
+          minDiff = diff;
+          nearest = note;
+        }
+      });
+
+      return nearest;
+    } catch (err) {
+      return 'A4';
+    }
+  }
+
+  /**
+   * Vérifier si une note existe
+   */
+  static noteExists(noteName) {
+    try {
+      return noteName in NoteFrequencies.FREQUENCIES;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /**
+   * Obtenir les notes vocales communes (C4 à C6)
+   */
+  static getVocalRange() {
+    try {
+      const range = {};
+      for (let octave = 4; octave <= 6; octave++) {
+        const notes = NoteFrequencies.getNotesInOctave(octave);
+        notes.forEach(note => {
+          range[note] = NoteFrequencies.FREQUENCIES[note];
+        });
       }
+      return range;
+    } catch (err) {
+      return {};
+    }
+  }
 
-      return englishNote;
-
-    } catch (error) {
-      Logger.error('NoteFrequencies', 'frenchToEnglish failed', error);
+  /**
+   * Obtenir l'intervalle entre deux notes
+   */
+  static getInterval(noteA, noteB) {
+    try {
+      const freqA = NoteFrequencies.getFrequency(noteA);
+      const freqB = NoteFrequencies.getFrequency(noteB);
+      if (!freqA || !freqB) return null;
+      
+      const semitones = 12 * Math.log2(freqB / freqA);
+      return {
+        semitones: semitones,
+        cents: semitones * 100,
+        ratio: freqB / freqA,
+      };
+    } catch (err) {
       return null;
     }
   }
 
   /**
-   * Conversion nom anglais → français
-   * @param {string} englishNote - Note en anglais (ex: "C4", "D#5")
-   * @returns {string|null} Note en français (ex: "Do4", "Ré#5")
+   * Transposer une note
    */
-  static englishToFrench(englishNote) {
+  static transpose(noteName, semitones) {
     try {
-      const mapping = {
-        'C': 'Do',
-        'D': 'Ré',
-        'E': 'Mi',
-        'F': 'Fa',
-        'G': 'Sol',
-        'A': 'La',
-        'B': 'Si',
-      };
+      const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+      const match = noteName.match(/^([A-G]#?)(-?\d+)$/);
+      if (!match) return null;
 
-      let frenchNote = englishNote;
+      const note = match[1];
+      const octave = parseInt(match[2]);
+      const noteIndex = notes.indexOf(note);
+      if (noteIndex === -1) return null;
 
-      for (const [en, fr] of Object.entries(mapping)) {
-        frenchNote = frenchNote.replace(new RegExp(`^${en}`), fr);
+      let newIndex = noteIndex + semitones;
+      let newOctave = octave;
+
+      while (newIndex < 0) {
+        newIndex += 12;
+        newOctave--;
+      }
+      while (newIndex >= 12) {
+        newIndex -= 12;
+        newOctave++;
       }
 
-      return frenchNote;
-
-    } catch (error) {
-      Logger.error('NoteFrequencies', 'englishToFrench failed', error);
+      return `${notes[newIndex]}${newOctave}`;
+    } catch (err) {
       return null;
     }
   }
 
   /**
-   * Récupère des notes de référence communes
-   * @returns {object} Notes de référence
+   * Obtenir les gammes communes
    */
-  static getCommonReferences() {
-    NoteFrequencies.#initialize();
+  static getScale(rootNote, scaleType = 'major') {
+    try {
+      const scales = {
+        major: [0, 2, 4, 5, 7, 9, 11],
+        minor: [0, 2, 3, 5, 7, 8, 10],
+        pentatonic: [0, 2, 4, 7, 9],
+      };
 
-    return {
-      // Diapason standard
-      a4: { note: 'A4', frequency: 440, description: 'La de référence (diapason)' },
-      
-      // Notes centrales piano
-      middleC: { note: 'C4', frequency: NoteFrequencies.getFrequency('C4'), description: 'Do central du piano' },
-      
-      // Plages vocales
-      bass: {
-        low: { note: 'E2', frequency: NoteFrequencies.getFrequency('E2') },
-        high: { note: 'D4', frequency: NoteFrequencies.getFrequency('D4') },
-      },
-      baritone: {
-        low: { note: 'G2', frequency: NoteFrequencies.getFrequency('G2') },
-        high: { note: 'G4', frequency: NoteFrequencies.getFrequency('G4') },
-      },
-      tenor: {
-        low: { note: 'C3', frequency: NoteFrequencies.getFrequency('C3') },
-        high: { note: 'C5', frequency: NoteFrequencies.getFrequency('C5') },
-      },
-      alto: {
-        low: { note: 'F3', frequency: NoteFrequencies.getFrequency('F3') },
-        high: { note: 'F5', frequency: NoteFrequencies.getFrequency('F5') },
-      },
-      mezzo: {
-        low: { note: 'G3', frequency: NoteFrequencies.getFrequency('G3') },
-        high: { note: 'G5', frequency: NoteFrequencies.getFrequency('G5') },
-      },
-      soprano: {
-        low: { note: 'C4', frequency: NoteFrequencies.getFrequency('C4') },
-        high: { note: 'C6', frequency: NoteFrequencies.getFrequency('C6') },
-      },
-    };
+      const intervals = scales[scaleType] || scales.major;
+      const scale = [];
+
+      intervals.forEach(semitone => {
+        const transposed = NoteFrequencies.transpose(rootNote, semitone);
+        if (transposed) {
+          scale.push(transposed);
+        }
+      });
+
+      return scale;
+    } catch (err) {
+      return [];
+    }
   }
 }
 
-// Initialiser automatiquement au chargement
-NoteFrequencies.getAllNotes(); // Force l'initialisation
+// Initialiser au chargement
+NoteFrequencies.initFrequencyMap();
 
-// Export par défaut
+export { NoteFrequencies };
 export default NoteFrequencies;

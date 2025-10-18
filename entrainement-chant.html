@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Entraînement Chant - Détection Pitch en Temps Réel</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #0e1729;
+      --card: #111a2e;
+      --grid: #1a2642;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --ok: #10b981;
+      --err: #ef4444;
+      --blue: #3b82f6;
+      --green: #22c55e;
+      --orange: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 system-ui, Segoe UI, Roboto, Arial, sans-serif;
+    }
+
+    .wrap {
+      max-width: 1400px;
+      margin: 20px auto;
+      padding: 0 16px;
+    }
+
+    .h1 {
+      font-weight: 800;
+      font-size: 20px;
+      margin: 0 0 16px 0;
+    }
+
+    .h2 {
+      font-weight: 700;
+      font-size: 14px;
+      margin: 0 0 8px 0;
+    }
+
+    .bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid #1f2a44;
+      background: var(--card);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+
+    .btn:hover:not([disabled]) {
+      background: #16213a;
+      border-color: #2a3a54;
+    }
+
+    .btn[disabled] {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .btn.ok {
+      background: #0e1f14;
+      border-color: #173621;
+      color: #c8facc;
+    }
+
+    .btn.err {
+      background: #2a0f14;
+      border-color: #4a171f;
+      color: #fecaca;
+    }
+
+    .seg {
+      display: inline-flex;
+      border: 1px solid #22304f;
+      background: var(--card);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .seg button {
+      padding: 8px 12px;
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .seg button.active {
+      background: #16213a;
+      color: #22c55e;
+    }
+
+    .timer {
+      padding: 8px 12px;
+      border: 1px solid #22304f;
+      border-radius: 8px;
+      background: var(--card);
+      min-width: 60px;
+      text-align: center;
+      font-weight: 600;
+      font-family: monospace;
+    }
+
+    .cols {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    @media (max-width: 1024px) {
+      .cols {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid #1f2a44;
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    .canvasWrap {
+      border: 1px solid #1f2a44;
+      border-radius: 8px;
+      padding: 4px;
+      background: #0b1324;
+      margin: 8px 0;
+      min-height: 320px;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 320px;
+      background: #0b1324;
+    }
+
+    .controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .log {
+      background: #0b1020;
+      border: 1px solid #1f2a44;
+      border-radius: 8px;
+      padding: 12px;
+      color: #dbeafe;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      max-height: 250px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .badge {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      border: 1px solid #22304f;
+      background: #0b1220;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .badge.ok {
+      color: #bbf7d0;
+      border-color: #206a44;
+      background: #052216;
+    }
+
+    .badge.warn {
+      color: #fde68a;
+      border-color: #6b4d11;
+      background: #261a06;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 6px 0 8px 0;
+    }
+
+    .right {
+      margin-left: auto;
+    }
+
+    input[type="file"] {
+      padding: 8px 12px;
+      border: 1px solid #22304f;
+      border-radius: 8px;
+      background: #0f172a;
+      color: var(--text);
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .metrics {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+      font-size: 12px;
+    }
+
+    .metric {
+      background: #0b1220;
+      border: 1px solid #22304f;
+      border-radius: 6px;
+      padding: 6px 10px;
+    }
+
+    .debugInfo {
+      background: #0b1020;
+      border: 1px solid #22304f;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 11px;
+      color: #cbd5e1;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="h1">🎵 Entraînement Chant — Détection Pitch Lissée</div>
+
+  <div class="bar">
+    <button id="btnMic" class="btn">🎤 Activer Micro</button>
+
+    <div class="seg">
+      <button id="btnRecStart" class="btn">▶ Enregistrer</button>
+      <button id="btnRecStop" class="btn err" disabled>⏹ Stop</button>
+    </div>
+
+    <div class="timer" id="timerRec">00:00</div>
+
+    <div class="seg">
+      <button id="btnMonOff" class="btn active">Moniteur OFF</button>
+      <button id="btnMonOn" class="btn">Moniteur ON</button>
+    </div>
+
+    <span class="right badge warn" id="detectorStatus">Détecteur: chargement...</span>
+  </div>
+
+  <div class="cols">
+    <!-- ENREGISTREMENT -->
+    <div class="panel">
+      <p class="h2">🎙️ Ton Enregistrement</p>
+      <div class="hint">Courbe bleue = ta hauteur lissée. Ligne verte pointillée = référence (440 Hz).</div>
+      <div class="canvasWrap">
+        <canvas id="canvasRec" width="600" height="320"></canvas>
+      </div>
+      <div class="debugInfo" id="debugRec">Prêt. Aucun enregistrement.</div>
+      <div class="controls">
+        <button id="btnDownWebM" class="btn">⬇️ WebM</button>
+        <button id="btnDownWAV" class="btn">🎧 WAV</button>
+        <button id="btnDownMP3" class="btn">🎵 MP3</button>
+        <button id="btnClearRec" class="btn">🗑️ Effacer</button>
+      </div>
+    </div>
+
+    <!-- RÉFÉRENCE -->
+    <div class="panel">
+      <p class="h2">🎼 Fichier de Référence</p>
+      <div class="hint">Charge un MP3/WAV pour comparer.</div>
+      <div class="canvasWrap">
+        <canvas id="canvasRef" width="600" height="320"></canvas>
+      </div>
+      <div class="debugInfo" id="debugRef">Prêt. Aucune référence chargée.</div>
+      <div class="controls">
+        <input type="file" id="fileUploadRef" accept="audio/*" />
+        <button id="btnClearRef" class="btn">🗑️ Effacer</button>
+      </div>
+      <div class="metrics" id="metricsRef">
+        <div class="metric">Écart moyen: <b id="mAvg">—</b></div>
+        <div class="metric">Écart max: <b id="mMax">—</b></div>
+        <div class="metric">% juste: <b id="mInTune">—</b></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="h1">📋 Logs</div>
+  <div id="logBox" class="log">Démarrage...</div>
+</div>
+
+<!-- ========== CDN & LIBRARIES ========== -->
+<!-- Pitchy pour la détection de pitch -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<script src="./src/vendor/pitchy-lite.js"></script>
+
+<!-- ========== MODULES ES6 ========== -->
+<script type="module">
+  import { Logger } from './src/logging/Logger.js';
+  import { AudioMath } from './src/utils/AudioMath.js';
+  import { AudioEngine } from './src/audio/core/AudioEngine.js';
+  import { AudioBus } from './src/audio/core/AudioBus.js';
+  import { PitchDetector } from './src/audio/analysis/PitchDetector.js';
+  import { PitchCurveDisplay } from './src/audio/visualization/PitchCurveDisplay.js';
+  import { Recorder } from './src/audio/recording/Recorder.js';
+  import { PitchSmoother } from './src/audio/visualization/PitchSmoother.js';
+
+  // ========== LOGGER ========== 
+  const logBox = document.getElementById('logBox');
+  const log = (level, msg) => {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2, '0');
+    const m = String(now.getMinutes()).padStart(2, '0');
+    const s = String(now.getSeconds()).padStart(2, '0');
+    const line = `[${h}:${m}:${s}] [${level}] ${msg}`;
+    logBox.textContent += line + '\n';
+    logBox.scrollTop = logBox.scrollHeight;
+  };
+
+  // ========== STATE ========== 
+  let audioEngine = null;
+  let audioBus = null;
+  let detector = null;
+  let smoother = null;
+  let recorder = null;
+  let displayRec = null;
+  let displayRef = null;
+  
+  let monitorOn = false;
+  let rafId = null;
+  let recStartTime = 0;
+  let timerInterval = null;
+
+  let refData = { pitch: [], duration: 0 };
+
+  // ========== DOM REFS ==========
+  const btnMic = document.getElementById('btnMic');
+  const btnRecStart = document.getElementById('btnRecStart');
+  const btnRecStop = document.getElementById('btnRecStop');
+  const timerRec = document.getElementById('timerRec');
+  const btnMonOff = document.getElementById('btnMonOff');
+  const btnMonOn = document.getElementById('btnMonOn');
+  const detectorStatus = document.getElementById('detectorStatus');
+  const debugRec = document.getElementById('debugRec');
+  const debugRef = document.getElementById('debugRef');
+  const mAvg = document.getElementById('mAvg');
+  const mMax = document.getElementById('mMax');
+  const mInTune = document.getElementById('mInTune');
+  const fileUploadRef = document.getElementById('fileUploadRef');
+  const btnDownWebM = document.getElementById('btnDownWebM');
+  const btnDownWAV = document.getElementById('btnDownWAV');
+  const btnDownMP3 = document.getElementById('btnDownMP3');
+  const btnClearRec = document.getElementById('btnClearRec');
+  const btnClearRef = document.getElementById('btnClearRef');
+
+  // ========== INITIALIZE ==========
+  async function init() {
+    try {
+      log('INFO', 'Initialisation en cours...');
+
+      // Créer les singletons
+      audioBus = new AudioBus();
+      audioEngine = new AudioEngine();
+      detector = new PitchDetector(audioEngine);
+      smoother = new PitchSmoother({
+        medianSize: 5,
+        smoothingFactor: 0.7,
+        jumpThreshold: 1.5
+      });
+      recorder = new Recorder(audioEngine, audioBus);
+      displayRec = new PitchCurveDisplay('canvasRec');
+      displayRef = new PitchCurveDisplay('canvasRef');
+
+      log('INFO', 'Modules créés avec succès');
+
+      // Écouter les événements
+      audioBus.subscribe('recording:started', () => {
+        log('INFO', 'Enregistrement démarré');
+        displayRec.startRecording();
+      });
+
+      audioBus.subscribe('recording:stopped', (data) => {
+        log('INFO', `Enregistrement arrêté (${data.duration.toFixed(1)}s)`);
+        displayRec.stopRecording();
+        debugRec.textContent = `Enregistrement sauvegardé (${data.duration.toFixed(1)}s, ${data.blob.size} bytes)`;
+      });
+
+      audioBus.subscribe('export:success', (data) => {
+        log('INFO', `Export ${data.format} réussi`);
+      });
+
+      audioBus.subscribe('export:error', (data) => {
+        log('ERROR', `Export erreur: ${data.error}`);
+      });
+
+      log('INFO', '✅ App initialisée');
+
+    } catch (err) {
+      log('ERROR', `Init failed: ${err.message}`);
+    }
+  }
+
+  // ========== UPDATE TIMER ==========
+  function updateTimer(secs) {
+    const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+    const ss = String(Math.floor(secs % 60)).padStart(2, '0');
+    timerRec.textContent = `${mm}:${ss}`;
+  }
+
+  // ========== ACTIVATE MICROPHONE ==========
+  async function activateMic() {
+    try {
+      await audioEngine.ensureAudioContext();
+      await audioEngine.requestMicrophoneAccess();
+
+      btnMic.disabled = true;
+      btnRecStart.disabled = false;
+
+      detectorStatus.textContent = 'Détecteur: OK';
+      detectorStatus.className = 'badge ok';
+
+      log('INFO', '🎤 Micro activé');
+
+    } catch (err) {
+      log('ERROR', `Mic activation failed: ${err.message}`);
+    }
+  }
+
+  // ========== START RECORDING ==========
+  async function startRecording() {
+    try {
+      displayRec.reset();
+      await recorder.startRecording();
+      recStartTime = audioEngine.audioCtx.currentTime;
+
+      btnRecStart.disabled = true;
+      btnRecStop.disabled = false;
+      updateTimer(0);
+
+      timerInterval = setInterval(() => {
+        const elapsed = audioEngine.audioCtx.currentTime - recStartTime;
+        updateTimer(elapsed);
+      }, 100);
+
+      startMonitor();
+
+    } catch (err) {
+      log('ERROR', `Recording start failed: ${err.message}`);
+    }
+  }
+
+  // ========== STOP RECORDING ==========
+  function stopRecording() {
+    try {
+      if (recorder.isRecording) {
+        recorder.stopRecording();
+        clearInterval(timerInterval);
+        btnRecStart.disabled = false;
+        btnRecStop.disabled = true;
+        updateTimer(0);
+        stopMonitor();
+      }
+    } catch (err) {
+      log('ERROR', `Recording stop failed: ${err.message}`);
+    }
+  }
+
+  // ========== START MONITOR (LIVE PITCH) ==========
+  function startMonitor() {
+    if (!detector || !audioEngine.analyser) return;
+    if (rafId) return;
+
+    const buf = new Float32Array(audioEngine.analyser.fftSize);
+
+    function tick() {
+      displayRec.draw();
+
+      audioEngine.analyser.getFloatTimeDomainData(buf);
+      const hz = detector.detect(buf);
+
+      if (hz && hz > 0) {
+        // Lisser
+        let smoothedHz = hz;
+        if (smoother) {
+          smoothedHz = smoother.smooth(hz);
+        }
+
+        const elapsed = audioEngine.audioCtx.currentTime - recStartTime;
+        displayRec.addPitchPoint(smoothedHz, elapsed, true);
+      }
+
+      if (monitorOn || (recorder && recorder.isRecording)) {
+        rafId = requestAnimationFrame(tick);
+      }
+    }
+
+    tick();
+  }
+
+  // ========== STOP MONITOR ==========
+  function stopMonitor() {
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    if (displayRec) {
+      displayRec.draw();
+    }
+  }
+
+  // ========== EXTRACT PITCH FROM AUDIO ==========
+  async function extractPitch(samples, sr) {
+    if (!detector) return [];
+
+    const result = [];
+    const win = 2048;
+    const hop = 512;
+
+    if (smoother) {
+      smoother.reset();
+    }
+
+    for (let i = 0; i + win <= samples.length; i += hop) {
+      const slice = samples.subarray(i, i + win);
+      const hz = detector.detect(slice);
+
+      if (hz && hz > 0) {
+        let smoothedHz = hz;
+        if (smoother) {
+          smoothedHz = smoother.smooth(hz);
+        }
+
+        const t = i / sr;
+        const cents = AudioMath.hzToCents(smoothedHz, 440);
+        result.push({ t, hz: smoothedHz, cents });
+      }
+    }
+
+    return result;
+  }
+
+  // ========== DRAW REFERENCE DATA ==========
+  function drawReferenceData() {
+    if (refData.pitch.length === 0) {
+      debugRef.textContent = 'Aucun point détecté.';
+      return;
+    }
+
+    for (const p of refData.pitch) {
+      displayRef.addPitchPoint(p.hz, p.t, true);
+    }
+
+    // Calculer les métriques
+    const devs = refData.pitch.map(p => Math.abs(p.cents));
+    const avg = devs.reduce((a, b) => a + b, 0) / devs.length;
+    const max = Math.max(...devs);
+    const inTune = refData.pitch.filter(p => Math.abs(p.cents) < 25).length / refData.pitch.length * 100;
+
+    mAvg.textContent = avg.toFixed(1) + 'c';
+    mMax.textContent = max.toFixed(1) + 'c';
+    mInTune.textContent = inTune.toFixed(1) + '%';
+
+    debugRef.textContent = `${refData.pitch.length} points détectés`;
+  }
+
+  // ========== EVENTS ==========
+  btnMic.onclick = () => activateMic();
+  btnRecStart.onclick = () => startRecording();
+  btnRecStop.onclick = () => stopRecording();
+
+  btnMonOff.onclick = () => {
+    monitorOn = false;
+    btnMonOff.classList.add('active');
+    btnMonOn.classList.remove('active');
+    stopMonitor();
+  };
+
+  btnMonOn.onclick = () => {
+    monitorOn = true;
+    btnMonOn.classList.add('active');
+    btnMonOff.classList.remove('active');
+    if (audioEngine.audioCtx) startMonitor();
+  };
+
+  btnDownWebM.onclick = () => {
+    if (recorder.lastBlob) {
+      recorder.downloadWebM('enregistrement.webm');
+    } else {
+      log('WARN', 'Aucun enregistrement à télécharger');
+    }
+  };
+
+  btnDownWAV.onclick = async () => {
+    await recorder.downloadWAV('enregistrement.wav');
+  };
+
+  btnDownMP3.onclick = async () => {
+    await recorder.downloadMP3('enregistrement.mp3');
+  };
+
+  btnClearRec.onclick = () => {
+    recorder.clearRecording();
+    displayRec.reset();
+    debugRec.textContent = 'Enregistrement effacé';
+    log('INFO', 'Enregistrement effacé');
+  };
+
+  fileUploadRef.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+      await audioEngine.ensureAudioContext();
+      const buf = await file.arrayBuffer();
+      const audioBuffer = await audioEngine.audioCtx.decodeAudioData(buf);
+      const channelData = audioBuffer.getChannelData(0);
+
+      refData.duration = audioBuffer.duration;
+      refData.pitch = await extractPitch(channelData, audioBuffer.sampleRate);
+
+      displayRef.reset();
+      drawReferenceData();
+
+      log('INFO', `Référence chargée: ${file.name} (${audioBuffer.duration.toFixed(1)}s)`);
+
+    } catch (err) {
+      log('ERROR', `Échec chargement référence: ${err.message}`);
+    }
+  });
+
+  btnClearRef.onclick = () => {
+    refData = { pitch: [], duration: 0 };
+    displayRef.reset();
+    mAvg.textContent = '—';
+    mMax.textContent = '—';
+    mInTune.textContent = '—';
+    debugRef.textContent = 'Référence effacée';
+    log('INFO', 'Référence effacée');
+  };
+
+  // ========== START ==========
+  window.addEventListener('DOMContentLoaded', () => {
+    init();
+  });
+</script>
+
+</body>
+</html>

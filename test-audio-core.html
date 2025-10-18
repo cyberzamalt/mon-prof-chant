@@ -648,7 +648,7 @@ function startMonitor() {
       // ← NOUVEAU: Passer par le smoother
       let smoothedHz = hz;
       if (smoother) {
-        smoothedHz = smoother.process(hz);
+        smoothedHz = smoother.smooth(hz);   // ✅ CORRECT
       }
 
       const cents = hzToCents(smoothedHz, 440);
@@ -817,7 +817,7 @@ function extractPitch(samples, sr) {
       // ← NOUVEAU: Lisser via smoother
       let smoothedHz = hz;
       if (smoother) {
-        smoothedHz = smoother.process(hz);
+        smoothedHz = smoother.smooth(hz);   // ✅ CORRECT
       }
 
       detectionCount++;

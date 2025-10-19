@@ -1,237 +1,109 @@
-/**
- * RecorderService.js
- * TYPE: Service - Audio Recording Management
- * 
- * Responsabilités:
- * - Gestion MediaRecorder
- * - Enregistrement WebM/Opus
- * - Gestion chunks et blob
- * - Événements enregistrement
- * 
- * Dépendances: Logger, AudioEngine, MicrophoneManager, AudioBus
- * Utilisé par: app.js
- */
+// src/audio/recording/RecorderService.js
+// Façade sûre autour de Recorder.js (évite de casser l’existant)
+// - Relais start/stop/pause/resume
+// - Events simples: 'start' | 'stop' | 'blob' | 'pause' | 'resume' | 'error'
+// - Méthodes download/exports si disponibles dans Recorder (fallBack no-op)
 
-import { Logger } from '../logging/Logger.js';
-import { AudioEngine } from '../audio/core/AudioEngine.js';
-import { MicrophoneManager } from '../audio/core/MicrophoneManager.js';
+import Recorder from './Recorder.js';
+import { Logger } from '../../logging/Logger.js';
 
-class RecorderService {
-  #recorder = null;
-  #chunks = [];
-  #listeners = new Map();
-  #tickInterval = null;
-  #startTime = 0;
-  #state = 'idle';
-  #mimeType = 'audio/webm;codecs=opus';
-  #audioBits = 128000;
-
+export default class RecorderService {
   constructor() {
-    try {
-      Logger.info('RecorderService', 'Initialized');
-    } catch (err) {
-      Logger.error('RecorderService', 'Constructor failed', err);
+    this.rec = new Recorder();
+    this._listeners = new Map(); // Map<evt, Set<fn>>
+  }
+
+  // --- Event bus minimal ---
+  on(evt, fn) {
+    if (!this._listeners.has(evt)) this._listeners.set(evt, new Set());
+    this._listeners.get(evt).add(fn);
+  }
+  off(evt, fn) {
+    if (!this._listeners.has(evt)) return;
+    this._listeners.get(evt).delete(fn);
+  }
+  _emit(evt, payload) {
+    const set = this._listeners.get(evt);
+    if (!set) return;
+    for (const fn of set) {
+      try { fn(payload); } catch (e) { /* silencieux */ }
     }
   }
 
-  /**
-   * Démarrer l'enregistrement
-   */
-  async start(stream = null) {
+  // --- Contrôle enregistrement ---
+  async start(stream, mimeType = 'audio/webm;codecs=opus') {
     try {
-      Logger.info('RecorderService', 'Start requested');
-
-      if (this.#state === 'recording') {
-        Logger.warn('RecorderService', 'Already recording');
-        return false;
-      }
-
-      if (!stream) {
-        throw new Error('Stream required');
-      }
-
-      // Déterminer le mime type supporté
-      const supportedTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
-      this.#mimeType = supportedTypes.find(type => MediaRecorder.isTypeSupported(type)) || supportedTypes[0];
-
-      this.#chunks = [];
-      this.#recorder = new MediaRecorder(stream, {
-        mimeType: this.#mimeType,
-        audioBitsPerSecond: this.#audioBits,
-      });
-
-      this.#recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          this.#chunks.push(e.data);
-        }
-      };
-
-      this.#recorder.onstop = () => {
-        this.#onRecorderStop();
-      };
-
-      this.#recorder.onerror = (e) => {
-        Logger.error('RecorderService', 'Recorder error', e.error);
-        this.#emit('error', { error: e.error });
-      };
-
-      this.#recorder.start(250); // timeslice
-      this.#startTime = performance.now();
-      this.#state = 'recording';
-
-      Logger.info('RecorderService', 'Recording started', { mimeType: this.#mimeType });
-      this.#emit('started', {});
-      this.#startTimer();
-
-      return true;
+      if (!this.rec || !this.rec.start) throw new Error('Recorder.start indisponible');
+      const ret = await this.rec.start(stream, mimeType);
+      this._emit('start', { mimeType });
+      return ret;
     } catch (err) {
-      Logger.error('RecorderService', 'start failed', err);
-      this.#state = 'error';
-      this.#emit('error', { error: err.message });
-      return false;
+      Logger?.error?.('[RecorderService] start', err);
+      this._emit('error', err);
+      throw err;
     }
   }
 
-  /**
-   * Arrêter l'enregistrement
-   */
   async stop() {
     try {
-      Logger.info('RecorderService', 'Stop requested');
-
-      if (this.#state !== 'recording') {
-        Logger.warn('RecorderService', 'Not recording');
-        return null;
-      }
-
-      if (this.#recorder && this.#recorder.state === 'recording') {
-        this.#recorder.stop();
-      }
-
-      clearInterval(this.#tickInterval);
-      this.#state = 'idle';
-
-      return this.#createBlob();
+      if (!this.rec || !this.rec.stop) throw new Error('Recorder.stop indisponible');
+      const ret = await this.rec.stop();
+      // compat : certains Recorder retournent { blob, mimeType, durationMs }
+      const blob = ret?.blob ?? (this.rec.getBlob ? this.rec.getBlob() : null);
+      if (blob) this._emit('blob', blob);
+      this._emit('stop', ret);
+      return ret;
     } catch (err) {
-      Logger.error('RecorderService', 'stop failed', err);
-      this.#state = 'error';
-      return null;
+      Logger?.error?.('[RecorderService] stop', err);
+      this._emit('error', err);
+      throw err;
     }
   }
 
-  /**
-   * Gérer l'arrêt du recorder
-   */
-  #onRecorderStop() {
+  pause() {
     try {
-      const blob = this.#createBlob();
-      Logger.info('RecorderService', 'Recording stopped', {
-        size: blob.size,
-        type: blob.type,
-        chunks: this.#chunks.length,
-      });
-      this.#emit('stopped', { blob });
+      if (this.rec?.pause) this.rec.pause();
+      this._emit('pause');
     } catch (err) {
-      Logger.error('RecorderService', 'onRecorderStop failed', err);
+      Logger?.error?.('[RecorderService] pause', err);
+      this._emit('error', err);
     }
   }
 
-  /**
-   * Créer un blob depuis les chunks
-   */
-  #createBlob() {
+  resume() {
     try {
-      const blob = new Blob(this.#chunks, { type: this.#mimeType });
-      return blob;
+      if (this.rec?.resume) this.rec.resume();
+      this._emit('resume');
     } catch (err) {
-      Logger.error('RecorderService', 'createBlob failed', err);
-      return new Blob([], { type: this.#mimeType });
+      Logger?.error?.('[RecorderService] resume', err);
+      this._emit('error', err);
     }
   }
 
-  /**
-   * Timer pour les ticks
-   */
-  #startTimer() {
-    try {
-      this.#tickInterval = setInterval(() => {
-        if (this.#state === 'recording') {
-          const elapsed = Math.floor((performance.now() - this.#startTime) / 1000);
-          this.#emit('tick', { seconds: elapsed });
-        }
-      }, 250);
-    } catch (err) {
-      Logger.error('RecorderService', 'startTimer failed', err);
-    }
-  }
-
-  /**
-   * Vérifier si enregistrement actif
-   */
-  isRecording() {
-    return this.#state === 'recording';
-  }
-
-  /**
-   * Obtenir le blob actuel
-   */
+  // --- Accès données ---
   getBlob() {
     try {
-      return this.#createBlob();
-    } catch (err) {
-      Logger.error('RecorderService', 'getBlob failed', err);
-      return null;
-    }
+      return this.rec?.getBlob ? this.rec.getBlob() : null;
+    } catch { return null; }
   }
 
-  /**
-   * Obtenir l'état
-   */
-  getState() {
-    return {
-      state: this.#state,
-      isRecording: this.isRecording(),
-      chunksCount: this.#chunks.length,
-      mimeType: this.#mimeType,
-    };
+  // --- Downloads / exports (si dispo dans Recorder) ---
+  async downloadWebM(filename = 'take.webm') {
+    if (this.rec?.downloadWebM) return this.rec.downloadWebM(filename);
+    // no-op si indisponible
+  }
+  async downloadWav(filename = 'take.wav') {
+    if (this.rec?.downloadWav) return this.rec.downloadWav(filename);
+  }
+  async downloadMp3(filename = 'take.mp3') {
+    if (this.rec?.downloadMp3) return this.rec.downloadMp3(filename);
   }
 
-  /**
-   * Écouter les événements
-   */
-  on(event, callback) {
-    try {
-      if (!this.#listeners.has(event)) {
-        this.#listeners.set(event, new Set());
-      }
-      this.#listeners.get(event).add(callback);
-      return () => this.#listeners.get(event).delete(callback);
-    } catch (err) {
-      Logger.error('RecorderService', 'on failed', err);
-      return () => {};
+  // --- Chargement d’un fichier existant pour lecture/analyse ---
+  async loadFile(file) {
+    if (this.rec?.loadFile) {
+      return this.rec.loadFile(file); // souvent retourne { arrayBuffer | audioBuffer | blob }
     }
-  }
-
-  /**
-   * Émettre un événement
-   */
-  #emit(event, data) {
-    try {
-      const listeners = this.#listeners.get(event);
-      if (listeners) {
-        listeners.forEach(callback => {
-          try {
-            callback(data);
-          } catch (err) {
-            Logger.error('RecorderService', `Listener failed for ${event}`, err);
-          }
-        });
-      }
-    } catch (err) {
-      Logger.error('RecorderService', `emit ${event} failed`, err);
-    }
+    return null;
   }
 }
-
-export { RecorderService };
-export default RecorderService;

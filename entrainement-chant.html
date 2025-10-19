@@ -1,681 +1,541 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Entraînement Chant - Détection Pitch en Temps Réel</title>
-  <style>
-    :root {
-      --bg: #0b1220;
-      --panel: #0e1729;
-      --card: #111a2e;
-      --grid: #1a2642;
-      --text: #e5e7eb;
-      --muted: #9ca3af;
-      --ok: #10b981;
-      --err: #ef4444;
-      --blue: #3b82f6;
-      --green: #22c55e;
-      --orange: #f59e0b;
-    }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entraînement de Chant - Détection Pitch en Temps Réel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-    * {
-      box-sizing: border-box;
-    }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 20px;
+        }
 
-    html, body {
-      height: 100%;
-      margin: 0;
-      padding: 0;
-    }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
 
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font: 14px/1.45 system-ui, Segoe UI, Roboto, Arial, sans-serif;
-    }
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px 0;
+            border-bottom: 2px solid #ff6600;
+        }
 
-    .wrap {
-      max-width: 1400px;
-      margin: 20px auto;
-      padding: 0 16px;
-    }
+        h1 {
+            font-size: 2.5em;
+            color: #ff6600;
+            margin-bottom: 10px;
+            text-shadow: 0 2px 10px rgba(255, 102, 0, 0.3);
+        }
 
-    .h1 {
-      font-weight: 800;
-      font-size: 20px;
-      margin: 0 0 16px 0;
-    }
+        .subtitle {
+            color: #aaa;
+            font-size: 1.1em;
+        }
 
-    .h2 {
-      font-weight: 700;
-      font-size: 14px;
-      margin: 0 0 8px 0;
-    }
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
 
-    .bar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-      margin-bottom: 12px;
-    }
+        .panel {
+            background: rgba(30, 30, 30, 0.8);
+            border: 1px solid #444;
+            border-radius: 10px;
+            padding: 25px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
 
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      border: 1px solid #1f2a44;
-      background: var(--card);
-      color: var(--text);
-      border-radius: 8px;
-      padding: 8px 12px;
-      cursor: pointer;
-      font-weight: 600;
-      font-size: 13px;
-      transition: all 0.2s;
-    }
+        .panel h2 {
+            color: #ff6600;
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #ff6600;
+        }
 
-    .btn:hover:not([disabled]) {
-      background: #16213a;
-      border-color: #2a3a54;
-    }
+        canvas {
+            width: 100%;
+            height: auto;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 8px;
+            display: block;
+            margin-bottom: 20px;
+        }
 
-    .btn[disabled] {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
 
-    .btn.ok {
-      background: #0e1f14;
-      border-color: #173621;
-      color: #c8facc;
-    }
+        button {
+            flex: 1;
+            min-width: 120px;
+            padding: 12px 20px;
+            font-size: 1em;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
 
-    .btn.err {
-      background: #2a0f14;
-      border-color: #4a171f;
-      color: #fecaca;
-    }
+        .btn-record {
+            background: #ff6600;
+            color: white;
+        }
 
-    .seg {
-      display: inline-flex;
-      border: 1px solid #22304f;
-      background: var(--card);
-      border-radius: 8px;
-      overflow: hidden;
-    }
+        .btn-record:hover {
+            background: #ff8533;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 102, 0, 0.4);
+        }
 
-    .seg button {
-      padding: 8px 12px;
-      border: 0;
-      background: transparent;
-      color: var(--text);
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 600;
-    }
+        .btn-record.recording {
+            background: #ff3333;
+            animation: pulse 1s infinite;
+        }
 
-    .seg button.active {
-      background: #16213a;
-      color: #22c55e;
-    }
+        .btn-stop {
+            background: #333;
+            color: #aaa;
+        }
 
-    .timer {
-      padding: 8px 12px;
-      border: 1px solid #22304f;
-      border-radius: 8px;
-      background: var(--card);
-      min-width: 60px;
-      text-align: center;
-      font-weight: 600;
-      font-family: monospace;
-    }
+        .btn-stop:hover:not(:disabled) {
+            background: #444;
+        }
 
-    .cols {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 16px;
-    }
+        .btn-stop:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
 
-    @media (max-width: 1024px) {
-      .cols {
-        grid-template-columns: 1fr;
-      }
-    }
+        .btn-clear {
+            background: #555;
+            color: #fff;
+        }
 
-    .panel {
-      background: var(--panel);
-      border: 1px solid #1f2a44;
-      border-radius: 12px;
-      padding: 16px;
-    }
+        .btn-clear:hover {
+            background: #666;
+        }
 
-    .canvasWrap {
-      border: 1px solid #1f2a44;
-      border-radius: 8px;
-      padding: 4px;
-      background: #0b1324;
-      margin: 8px 0;
-      min-height: 320px;
-    }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
 
-    canvas {
-      display: block;
-      width: 100%;
-      height: 320px;
-      background: #0b1324;
-    }
+        .status {
+            background: rgba(50, 50, 50, 0.8);
+            border-left: 4px solid #ff6600;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-family: monospace;
+            font-size: 0.95em;
+            line-height: 1.6;
+        }
 
-    .controls {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-top: 8px;
-    }
+        .status-line {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+        }
 
-    .log {
-      background: #0b1020;
-      border: 1px solid #1f2a44;
-      border-radius: 8px;
-      padding: 12px;
-      color: #dbeafe;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 12px;
-      max-height: 250px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
+        .status-label {
+            color: #ff6600;
+            font-weight: bold;
+        }
 
-    .badge {
-      display: inline-flex;
-      gap: 6px;
-      align-items: center;
-      border: 1px solid #22304f;
-      background: #0b1220;
-      padding: 4px 8px;
-      border-radius: 6px;
-      font-size: 12px;
-    }
+        .status-value {
+            color: #00ff00;
+        }
 
-    .badge.ok {
-      color: #bbf7d0;
-      border-color: #206a44;
-      background: #052216;
-    }
+        .status-value.warning {
+            color: #ffaa00;
+        }
 
-    .badge.warn {
-      color: #fde68a;
-      border-color: #6b4d11;
-      background: #261a06;
-    }
+        .status-value.error {
+            color: #ff3333;
+        }
 
-    .hint {
-      color: var(--muted);
-      font-size: 12px;
-      margin: 6px 0 8px 0;
-    }
+        .logs {
+            background: rgba(20, 20, 20, 0.9);
+            border: 1px solid #333;
+            border-radius: 5px;
+            padding: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.9em;
+            color: #0f0;
+        }
 
-    .right {
-      margin-left: auto;
-    }
+        .log-line {
+            margin: 3px 0;
+            padding: 2px 5px;
+            border-left: 2px solid #0f0;
+            padding-left: 10px;
+        }
 
-    input[type="file"] {
-      padding: 8px 12px;
-      border: 1px solid #22304f;
-      border-radius: 8px;
-      background: #0f172a;
-      color: var(--text);
-      font-size: 13px;
-      cursor: pointer;
-    }
+        .log-line.error {
+            color: #f00;
+            border-left-color: #f00;
+        }
 
-    .metrics {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-top: 8px;
-      font-size: 12px;
-    }
+        .log-line.warn {
+            color: #ff0;
+            border-left-color: #ff0;
+        }
 
-    .metric {
-      background: #0b1220;
-      border: 1px solid #22304f;
-      border-radius: 6px;
-      padding: 6px 10px;
-    }
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 1.8em;
+            }
 
-    .debugInfo {
-      background: #0b1020;
-      border: 1px solid #22304f;
-      border-radius: 6px;
-      padding: 6px 10px;
-      font-size: 11px;
-      color: #cbd5e1;
-      margin-top: 8px;
-    }
-  </style>
+            .controls {
+                flex-direction: column;
+            }
+
+            button {
+                width: 100%;
+            }
+        }
+    </style>
 </head>
 <body>
+    <div class="container">
+        <header>
+            <h1>🎤 Entraînement de Chant</h1>
+            <p class="subtitle">Détection Pitch en Temps Réel avec Visualisation</p>
+        </header>
 
-<div class="wrap">
-  <div class="h1">🎵 Entraînement Chant — Détection Pitch Lissée</div>
+        <div class="main-grid">
+            <!-- Panel Enregistrement -->
+            <div class="panel">
+                <h2>📊 Visualisation Pitch</h2>
 
-  <div class="bar">
-    <button id="btnMic" class="btn">🎤 Activer Micro</button>
+                <!-- Canvas -->
+                <canvas id="canvasRec" width="1000" height="400"></canvas>
 
-    <div class="seg">
-      <button id="btnRecStart" class="btn">▶ Enregistrer</button>
-      <button id="btnRecStop" class="btn err" disabled>⏹ Stop</button>
+                <!-- Status -->
+                <div class="status">
+                    <div class="status-line">
+                        <span class="status-label">État:</span>
+                        <span class="status-value" id="statusState">Prêt</span>
+                    </div>
+                    <div class="status-line">
+                        <span class="status-label">Fréquence Actuelle:</span>
+                        <span class="status-value" id="statusHz">-</span>
+                    </div>
+                    <div class="status-line">
+                        <span class="status-label">Cents:</span>
+                        <span class="status-value" id="statusCents">-</span>
+                    </div>
+                    <div class="status-line">
+                        <span class="status-label">Clarté:</span>
+                        <span class="status-value" id="statusClarity">-</span>
+                    </div>
+                    <div class="status-line">
+                        <span class="status-label">Points Affichés:</span>
+                        <span class="status-value" id="statusPoints">0</span>
+                    </div>
+                </div>
+
+                <!-- Contrôles -->
+                <div class="controls">
+                    <button class="btn-record" id="btnRecord">▶ Enregistrer</button>
+                    <button class="btn-stop" id="btnStop" disabled>⏹ Arrêter</button>
+                    <button class="btn-clear" id="btnClear">🗑 Effacer</button>
+                </div>
+
+                <!-- Logs -->
+                <h3 style="color: #ff6600; margin-top: 20px; margin-bottom: 10px;">📋 Logs en Direct</h3>
+                <div class="logs" id="logsContainer"></div>
+            </div>
+        </div>
     </div>
 
-    <div class="timer" id="timerRec">00:00</div>
+    <!-- Scripts externes -->
+    <script src="https://cdn.jsdelivr.net/npm/tone@14/build/Tone.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pitchy@3/dist/Pitchy.js"></script>
 
-    <div class="seg">
-      <button id="btnMonOff" class="btn active">Moniteur OFF</button>
-      <button id="btnMonOn" class="btn">Moniteur ON</button>
-    </div>
+    <!-- Modules internes -->
+    <script type="module">
+        /**
+         * MAIN APPLICATION
+         * Orchestration complète de l'app d'entraînement vocal
+         */
 
-    <span class="right badge warn" id="detectorStatus">Détecteur: chargement...</span>
-  </div>
+        // Import des modules
+        import { Logger } from './src/logging/Logger.js';
+        import { AudioEngine } from './src/audio/core/AudioEngine.js';
+        import { AudioBus } from './src/audio/core/AudioBus.js';
+        import PitchCurveDisplay from './src/audio/visualization/PitchCurveDisplay.js';
+        import { Recorder } from './src/audio/recording/Recorder.js';
+        import PitchDetector from './src/audio/analysis/PitchDetector.js';
 
-  <div class="cols">
-    <!-- ENREGISTREMENT -->
-    <div class="panel">
-      <p class="h2">🎙️ Ton Enregistrement</p>
-      <div class="hint">Courbe bleue = ta hauteur lissée. Ligne verte pointillée = référence (440 Hz).</div>
-      <div class="canvasWrap">
-        <canvas id="canvasRec" width="600" height="320"></canvas>
-      </div>
-      <div class="debugInfo" id="debugRec">Prêt. Aucun enregistrement.</div>
-      <div class="controls">
-        <button id="btnDownWebM" class="btn">⬇️ WebM</button>
-        <button id="btnDownWAV" class="btn">🎧 WAV</button>
-        <button id="btnDownMP3" class="btn">🎵 MP3</button>
-        <button id="btnClearRec" class="btn">🗑️ Effacer</button>
-      </div>
-    </div>
+        // ========== GLOBAL STATE ==========
+        const logger = new Logger('MainApp');
+        let audioEngine = null;
+        let audioBus = null;
+        let pitchDisplay = null;
+        let recorder = null;
+        let pitchDetector = null;
+        let isRecording = false;
+        let currentRecordingStartTime = null;
 
-    <!-- RÉFÉRENCE -->
-    <div class="panel">
-      <p class="h2">🎼 Fichier de Référence</p>
-      <div class="hint">Charge un MP3/WAV pour comparer.</div>
-      <div class="canvasWrap">
-        <canvas id="canvasRef" width="600" height="320"></canvas>
-      </div>
-      <div class="debugInfo" id="debugRef">Prêt. Aucune référence chargée.</div>
-      <div class="controls">
-        <input type="file" id="fileUploadRef" accept="audio/*" />
-        <button id="btnClearRef" class="btn">🗑️ Effacer</button>
-      </div>
-      <div class="metrics" id="metricsRef">
-        <div class="metric">Écart moyen: <b id="mAvg">—</b></div>
-        <div class="metric">Écart max: <b id="mMax">—</b></div>
-        <div class="metric">% juste: <b id="mInTune">—</b></div>
-      </div>
-    </div>
-  </div>
+        // Buffers pour pitch smoothing
+        let pitchSmoother = null;
+        let lastValidPitch = null;
 
-  <div class="h1">📋 Logs</div>
-  <div id="logBox" class="log">Démarrage...</div>
-</div>
+        // ========== UI ELEMENTS ==========
+        const btnRecord = document.getElementById('btnRecord');
+        const btnStop = document.getElementById('btnStop');
+        const btnClear = document.getElementById('btnClear');
+        const statusState = document.getElementById('statusState');
+        const statusHz = document.getElementById('statusHz');
+        const statusCents = document.getElementById('statusCents');
+        const statusClarity = document.getElementById('statusClarity');
+        const statusPoints = document.getElementById('statusPoints');
+        const logsContainer = document.getElementById('logsContainer');
 
-<!-- ========== CDN & LIBRARIES ========== -->
-<!-- Pitchy pour la détection de pitch -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
-<script src="./src/vendor/pitchy-lite.js"></script>
+        // ========== LOGGING TO UI ==========
+        function addLog(message, type = 'info') {
+            try {
+                const line = document.createElement('div');
+                line.className = `log-line ${type}`;
+                line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+                logsContainer.appendChild(line);
+                logsContainer.scrollTop = logsContainer.scrollHeight;
 
-<!-- ========== MODULES ES6 ========== -->
-<script type="module">
-  import { Logger } from './src/logging/Logger.js';
-  import { AudioMath } from './src/utils/AudioMath.js';
-  import { AudioEngine } from './src/audio/core/AudioEngine.js';
-  import { AudioBus } from './src/audio/core/AudioBus.js';
-  import { PitchDetector } from './src/audio/analysis/PitchDetector.js';
-  import { PitchCurveDisplay } from './src/audio/visualization/PitchCurveDisplay.js';
-  import { Recorder } from './src/audio/recording/Recorder.js';
-  import { PitchSmoother } from './src/audio/visualization/PitchSmoother.js';
-
-  // ========== LOGGER ========== 
-  const logBox = document.getElementById('logBox');
-  const log = (level, msg) => {
-    const now = new Date();
-    const h = String(now.getHours()).padStart(2, '0');
-    const m = String(now.getMinutes()).padStart(2, '0');
-    const s = String(now.getSeconds()).padStart(2, '0');
-    const line = `[${h}:${m}:${s}] [${level}] ${msg}`;
-    logBox.textContent += line + '\n';
-    logBox.scrollTop = logBox.scrollHeight;
-  };
-
-  // ========== STATE ========== 
-  let audioEngine = null;
-  let audioBus = null;
-  let detector = null;
-  let smoother = null;
-  let recorder = null;
-  let displayRec = null;
-  let displayRef = null;
-  
-  let monitorOn = false;
-  let rafId = null;
-  let recStartTime = 0;
-  let timerInterval = null;
-
-  let refData = { pitch: [], duration: 0 };
-
-  // ========== DOM REFS ==========
-  const btnMic = document.getElementById('btnMic');
-  const btnRecStart = document.getElementById('btnRecStart');
-  const btnRecStop = document.getElementById('btnRecStop');
-  const timerRec = document.getElementById('timerRec');
-  const btnMonOff = document.getElementById('btnMonOff');
-  const btnMonOn = document.getElementById('btnMonOn');
-  const detectorStatus = document.getElementById('detectorStatus');
-  const debugRec = document.getElementById('debugRec');
-  const debugRef = document.getElementById('debugRef');
-  const mAvg = document.getElementById('mAvg');
-  const mMax = document.getElementById('mMax');
-  const mInTune = document.getElementById('mInTune');
-  const fileUploadRef = document.getElementById('fileUploadRef');
-  const btnDownWebM = document.getElementById('btnDownWebM');
-  const btnDownWAV = document.getElementById('btnDownWAV');
-  const btnDownMP3 = document.getElementById('btnDownMP3');
-  const btnClearRec = document.getElementById('btnClearRec');
-  const btnClearRef = document.getElementById('btnClearRef');
-
-  // ========== INITIALIZE ==========
-  async function init() {
-    try {
-      log('INFO', 'Initialisation en cours...');
-
-      // Créer les singletons
-      audioBus = new AudioBus();
-      audioEngine = new AudioEngine();
-      detector = new PitchDetector(audioEngine);
-      smoother = new PitchSmoother({
-        medianSize: 5,
-        smoothingFactor: 0.7,
-        jumpThreshold: 1.5
-      });
-      recorder = new Recorder(audioEngine, audioBus);
-      displayRec = new PitchCurveDisplay('canvasRec');
-      displayRef = new PitchCurveDisplay('canvasRef');
-
-      log('INFO', 'Modules créés avec succès');
-
-      // Écouter les événements
-      audioBus.subscribe('recording:started', () => {
-        log('INFO', 'Enregistrement démarré');
-        displayRec.startRecording();
-      });
-
-      audioBus.subscribe('recording:stopped', (data) => {
-        log('INFO', `Enregistrement arrêté (${data.duration.toFixed(1)}s)`);
-        displayRec.stopRecording();
-        debugRec.textContent = `Enregistrement sauvegardé (${data.duration.toFixed(1)}s, ${data.blob.size} bytes)`;
-      });
-
-      audioBus.subscribe('export:success', (data) => {
-        log('INFO', `Export ${data.format} réussi`);
-      });
-
-      audioBus.subscribe('export:error', (data) => {
-        log('ERROR', `Export erreur: ${data.error}`);
-      });
-
-      log('INFO', '✅ App initialisée');
-
-    } catch (err) {
-      log('ERROR', `Init failed: ${err.message}`);
-    }
-  }
-
-  // ========== UPDATE TIMER ==========
-  function updateTimer(secs) {
-    const mm = String(Math.floor(secs / 60)).padStart(2, '0');
-    const ss = String(Math.floor(secs % 60)).padStart(2, '0');
-    timerRec.textContent = `${mm}:${ss}`;
-  }
-
-  // ========== ACTIVATE MICROPHONE ==========
-  async function activateMic() {
-    try {
-      await audioEngine.ensureAudioContext();
-      await audioEngine.requestMicrophoneAccess();
-
-      btnMic.disabled = true;
-      btnRecStart.disabled = false;
-
-      detectorStatus.textContent = 'Détecteur: OK';
-      detectorStatus.className = 'badge ok';
-
-      log('INFO', '🎤 Micro activé');
-
-    } catch (err) {
-      log('ERROR', `Mic activation failed: ${err.message}`);
-    }
-  }
-
-  // ========== START RECORDING ==========
-  async function startRecording() {
-    try {
-      displayRec.reset();
-      await recorder.startRecording();
-      recStartTime = audioEngine.audioCtx.currentTime;
-
-      btnRecStart.disabled = true;
-      btnRecStop.disabled = false;
-      updateTimer(0);
-
-      timerInterval = setInterval(() => {
-        const elapsed = audioEngine.audioCtx.currentTime - recStartTime;
-        updateTimer(elapsed);
-      }, 100);
-
-      startMonitor();
-
-    } catch (err) {
-      log('ERROR', `Recording start failed: ${err.message}`);
-    }
-  }
-
-  // ========== STOP RECORDING ==========
-  function stopRecording() {
-    try {
-      if (recorder.isRecording) {
-        recorder.stopRecording();
-        clearInterval(timerInterval);
-        btnRecStart.disabled = false;
-        btnRecStop.disabled = true;
-        updateTimer(0);
-        stopMonitor();
-      }
-    } catch (err) {
-      log('ERROR', `Recording stop failed: ${err.message}`);
-    }
-  }
-
-  // ========== START MONITOR (LIVE PITCH) ==========
-  function startMonitor() {
-    if (!detector || !audioEngine.analyser) return;
-    if (rafId) return;
-
-    const buf = new Float32Array(audioEngine.analyser.fftSize);
-
-    function tick() {
-      displayRec.draw();
-
-      audioEngine.analyser.getFloatTimeDomainData(buf);
-      const hz = detector.detect(buf);
-
-      if (hz && hz > 0) {
-        // Lisser
-        let smoothedHz = hz;
-        if (smoother) {
-          smoothedHz = smoother.smooth(hz);
+                // Limiter les logs affichés
+                while (logsContainer.children.length > 50) {
+                    logsContainer.removeChild(logsContainer.firstChild);
+                }
+            } catch (err) {
+                console.error('addLog failed:', err);
+            }
         }
 
-        const elapsed = audioEngine.audioCtx.currentTime - recStartTime;
-        displayRec.addPitchPoint(smoothedHz, elapsed, true);
-      }
-
-      if (monitorOn || (recorder && recorder.isRecording)) {
-        rafId = requestAnimationFrame(tick);
-      }
-    }
-
-    tick();
-  }
-
-  // ========== STOP MONITOR ==========
-  function stopMonitor() {
-    if (rafId) {
-      cancelAnimationFrame(rafId);
-      rafId = null;
-    }
-    if (displayRec) {
-      displayRec.draw();
-    }
-  }
-
-  // ========== EXTRACT PITCH FROM AUDIO ==========
-  async function extractPitch(samples, sr) {
-    if (!detector) return [];
-
-    const result = [];
-    const win = 2048;
-    const hop = 512;
-
-    if (smoother) {
-      smoother.reset();
-    }
-
-    for (let i = 0; i + win <= samples.length; i += hop) {
-      const slice = samples.subarray(i, i + win);
-      const hz = detector.detect(slice);
-
-      if (hz && hz > 0) {
-        let smoothedHz = hz;
-        if (smoother) {
-          smoothedHz = smoother.smooth(hz);
+        // ========== PITCH SMOOTHING ==========
+        function initPitchSmoother() {
+            try {
+                pitchSmoother = new window.PitchSmoother({
+                    medianWindowSize: 5,
+                    smoothingFactor: 0.7,
+                    maxPitchJump: 100,
+                    minConfidence: 0.3
+                });
+                addLog('✓ Pitch Smoother initialized', 'info');
+            } catch (err) {
+                addLog('✗ Pitch Smoother init failed: ' + err.message, 'error');
+            }
         }
 
-        const t = i / sr;
-        const cents = AudioMath.hzToCents(smoothedHz, 440);
-        result.push({ t, hz: smoothedHz, cents });
-      }
-    }
+        // ========== INITIALIZATION ==========
+        async function initializeApp() {
+            try {
+                addLog('Initializing application...', 'info');
 
-    return result;
-  }
+                // AudioEngine
+                audioEngine = AudioEngine.getInstance();
+                await audioEngine.initialize({
+                    sampleRate: 48000,
+                    latencyHint: 'interactive'
+                });
+                addLog('✓ AudioEngine initialized', 'info');
 
-  // ========== DRAW REFERENCE DATA ==========
-  function drawReferenceData() {
-    if (refData.pitch.length === 0) {
-      debugRef.textContent = 'Aucun point détecté.';
-      return;
-    }
+                // AudioBus
+                audioBus = new AudioBus();
+                addLog('✓ AudioBus initialized', 'info');
 
-    for (const p of refData.pitch) {
-      displayRef.addPitchPoint(p.hz, p.t, true);
-    }
+                // PitchDisplay
+                pitchDisplay = new PitchCurveDisplay('canvasRec');
+                addLog('✓ PitchCurveDisplay initialized', 'info');
 
-    // Calculer les métriques
-    const devs = refData.pitch.map(p => Math.abs(p.cents));
-    const avg = devs.reduce((a, b) => a + b, 0) / devs.length;
-    const max = Math.max(...devs);
-    const inTune = refData.pitch.filter(p => Math.abs(p.cents) < 25).length / refData.pitch.length * 100;
+                // Recorder
+                recorder = new Recorder(audioEngine, audioBus);
+                addLog('✓ Recorder initialized', 'info');
 
-    mAvg.textContent = avg.toFixed(1) + 'c';
-    mMax.textContent = max.toFixed(1) + 'c';
-    mInTune.textContent = inTune.toFixed(1) + '%';
+                // Pitch Smoother
+                initPitchSmoother();
 
-    debugRef.textContent = `${refData.pitch.length} points détectés`;
-  }
+                // PitchDetector
+                pitchDetector = new PitchDetector(audioEngine, {
+                    onPitch: handlePitchDetection,
+                    bufferSize: 2048,
+                    clarity: 0.85
+                });
+                addLog('✓ PitchDetector initialized', 'info');
 
-  // ========== EVENTS ==========
-  btnMic.onclick = () => activateMic();
-  btnRecStart.onclick = () => startRecording();
-  btnRecStop.onclick = () => stopRecording();
+                // UI Setup
+                setupUI();
 
-  btnMonOff.onclick = () => {
-    monitorOn = false;
-    btnMonOff.classList.add('active');
-    btnMonOn.classList.remove('active');
-    stopMonitor();
-  };
+                addLog('✓ Application ready!', 'info');
+                statusState.textContent = 'Prêt';
+                statusState.className = 'status-value';
 
-  btnMonOn.onclick = () => {
-    monitorOn = true;
-    btnMonOn.classList.add('active');
-    btnMonOff.classList.remove('active');
-    if (audioEngine.audioCtx) startMonitor();
-  };
+            } catch (err) {
+                addLog('✗ Initialization failed: ' + err.message, 'error');
+                console.error('Init failed:', err);
+            }
+        }
 
-  btnDownWebM.onclick = () => {
-    if (recorder.lastBlob) {
-      recorder.downloadWebM('enregistrement.webm');
-    } else {
-      log('WARN', 'Aucun enregistrement à télécharger');
-    }
-  };
+        // ========== PITCH DETECTION HANDLER ==========
+        function handlePitchDetection(pitchData) {
+            try {
+                const { timeSec, value, meta } = pitchData;
+                let hz = meta.hz;
+                let clarity = meta.clarity;
 
-  btnDownWAV.onclick = async () => {
-    await recorder.downloadWAV('enregistrement.wav');
-  };
+                // Lissage
+                if (pitchSmoother) {
+                    const smoothed = pitchSmoother.smooth(hz, clarity);
+                    if (smoothed !== null) {
+                        hz = smoothed;
+                    }
+                }
 
-  btnDownMP3.onclick = async () => {
-    await recorder.downloadMP3('enregistrement.mp3');
-  };
+                // Ajouter au display si en train d'enregistrer
+                if (isRecording && pitchDisplay) {
+                    pitchDisplay.addPitchPoint(hz, timeSec, clarity);
+                }
 
-  btnClearRec.onclick = () => {
-    recorder.clearRecording();
-    displayRec.reset();
-    debugRec.textContent = 'Enregistrement effacé';
-    log('INFO', 'Enregistrement effacé');
-  };
+                // Mettre à jour l'UI
+                const stats = pitchDisplay?.getStats();
+                if (stats) {
+                    statusHz.textContent = hz.toFixed(1) + ' Hz';
+                    statusCents.textContent = stats.averageCents.toFixed(1) + ' ¢';
+                    statusClarity.textContent = (clarity * 100).toFixed(0) + '%';
+                    statusPoints.textContent = stats.pointsDisplayed;
+                }
 
-  fileUploadRef.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+            } catch (err) {
+                addLog('✗ Pitch detection handler error: ' + err.message, 'error');
+            }
+        }
 
-    try {
-      await audioEngine.ensureAudioContext();
-      const buf = await file.arrayBuffer();
-      const audioBuffer = await audioEngine.audioCtx.decodeAudioData(buf);
-      const channelData = audioBuffer.getChannelData(0);
+        // ========== UI EVENT HANDLERS ==========
+        function setupUI() {
+            try {
+                btnRecord.addEventListener('click', startRecording);
+                btnStop.addEventListener('click', stopRecording);
+                btnClear.addEventListener('click', clearRecording);
+                addLog('✓ UI handlers attached', 'info');
+            } catch (err) {
+                addLog('✗ UI setup failed: ' + err.message, 'error');
+            }
+        }
 
-      refData.duration = audioBuffer.duration;
-      refData.pitch = await extractPitch(channelData, audioBuffer.sampleRate);
+        async function startRecording() {
+            try {
+                addLog('Starting recording...', 'info');
+                statusState.textContent = 'Enregistrement en cours...';
+                statusState.className = 'status-value warning';
 
-      displayRef.reset();
-      drawReferenceData();
+                // Assurer que l'AudioContext est running
+                if (!audioEngine.isRunning()) {
+                    await audioEngine.resume();
+                }
 
-      log('INFO', `Référence chargée: ${file.name} (${audioBuffer.duration.toFixed(1)}s)`);
+                // Réinitialiser
+                isRecording = true;
+                currentRecordingStartTime = Date.now();
+                pitchDisplay.startRecording();
+                pitchSmoother.reset();
 
-    } catch (err) {
-      log('ERROR', `Échec chargement référence: ${err.message}`);
-    }
-  });
+                // Démarrer enregistrement MediaRecorder
+                await recorder.startRecording();
 
-  btnClearRef.onclick = () => {
-    refData = { pitch: [], duration: 0 };
-    displayRef.reset();
-    mAvg.textContent = '—';
-    mMax.textContent = '—';
-    mInTune.textContent = '—';
-    debugRef.textContent = 'Référence effacée';
-    log('INFO', 'Référence effacée');
-  };
+                // Connecter et démarrer PitchDetector
+                const microphone = await audioEngine.getContext().createMediaStreamAudioSource(
+                    await navigator.mediaDevices.getUserMedia({ audio: true })
+                );
+                pitchDetector.connect(microphone);
+                pitchDetector.start();
 
-  // ========== START ==========
-  window.addEventListener('DOMContentLoaded', () => {
-    init();
-  });
-</script>
+                // UI
+                btnRecord.disabled = true;
+                btnRecord.classList.add('recording');
+                btnStop.disabled = false;
 
+                addLog('✓ Recording started', 'info');
+
+            } catch (err) {
+                addLog('✗ Recording start failed: ' + err.message, 'error');
+                isRecording = false;
+                btnRecord.disabled = false;
+                btnStop.disabled = true;
+            }
+        }
+
+        async function stopRecording() {
+            try {
+                addLog('Stopping recording...', 'info');
+                statusState.textContent = 'Arrêté';
+                statusState.className = 'status-value';
+
+                isRecording = false;
+
+                // Arrêter détection
+                pitchDetector.stop();
+                recorder.stopRecording();
+                pitchDisplay.stopRecording();
+
+                // UI
+                btnRecord.disabled = false;
+                btnRecord.classList.remove('recording');
+                btnStop.disabled = true;
+
+                // Infos finales
+                const stats = pitchDisplay.getStats();
+                if (stats) {
+                    addLog(`Recording finished: ${stats.pointsDisplayed} points enregistrés`, 'info');
+                }
+
+            } catch (err) {
+                addLog('✗ Recording stop failed: ' + err.message, 'error');
+            }
+        }
+
+        function clearRecording() {
+            try {
+                addLog('Clearing recording...', 'info');
+                pitchDisplay.clear();
+                pitchSmoother.reset();
+                statusHz.textContent = '-';
+                statusCents.textContent = '-';
+                statusClarity.textContent = '-';
+                statusPoints.textContent = '0';
+                addLog('✓ Canvas cleared', 'info');
+            } catch (err) {
+                addLog('✗ Clear failed: ' + err.message, 'error');
+            }
+        }
+
+        // ========== STARTUP ==========
+        window.addEventListener('DOMContentLoaded', initializeApp);
+        window.addEventListener('error', (e) => {
+            addLog('✗ Global error: ' + e.message, 'error');
+        });
+    </script>
 </body>
 </html>

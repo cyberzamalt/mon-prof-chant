@@ -129,8 +129,9 @@ let audioCtx = null;
 let analyser = null;
 let micStream = null;
 let mediaRecorder = null;
-let monitorGain = null;          // gain de monitoring (tirage)
-let micSource = null;            // <-- RÉFÉRENCE GLOBALE AU NODE SOURCE
+let micSource = null;            // garder la source vivante
+let monitorGain = null;          // retour casque ON/OFF
+let pullGain = null;             // tirage inaudible pour l'analyser (Firefox)
 let chunks = [];
 let lastBlob = null;
 let detector = null;
@@ -212,21 +213,29 @@ async function activateMic(){
     await ensureAudio();
     if(!micStream){ micStream = await navigator.mediaDevices.getUserMedia({audio:true}); log('INFO','Microphone autorisé'); }
 
-    // source + analyser
-    micSource = audioCtx.createMediaStreamSource(micStream);   // <-- garder la ref globale
-    analyser = audioCtx.createAnalyser();
+    // ---- Noeuds
+    micSource = audioCtx.createMediaStreamSource(micStream);   // garder la ref globale (Firefox)
+    analyser  = audioCtx.createAnalyser();
     analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.0; // on veut la forme brute pour la détection
+    analyser.smoothingTimeConstant = 0.0;
 
-    // ==== BRANCHEMENT EN PARALLÈLE (FIABLE FIREFOX) ====
-    monitorGain = audioCtx.createGain();
-    monitorGain.gain.value = 0.0001;        // OFF quasi muet, mais la chaîne est "tirée"
-    micSource.connect(monitorGain);         // micro -> monitor (retour son)
-    micSource.connect(analyser);            // micro -> analyser (branche dédiée)
+    monitorGain = audioCtx.createGain(); // retour casque
+    monitorGain.gain.value = 0.0001;     // OFF quasi muet (mais activé)
+
+    pullGain = audioCtx.createGain();    // tirage pour l'analyser
+    pullGain.gain.value = 0.0001;        // inaudible, juste pour forcer le traitement
+
+    // ---- Branches parallèles
+    // Monitoring
+    micSource.connect(monitorGain);
     monitorGain.connect(audioCtx.destination);
-    // ====================================================
 
-    log('INFO','Analyser connecté + tirage vers destination (source retenue)');
+    // Analyse (tirée vers la sortie via pullGain)
+    micSource.connect(analyser);
+    analyser.connect(pullGain);
+    pullGain.connect(audioCtx.destination);
+
+    log('INFO','Graphe audio câblé (monitor + pullGain pour analyser)');
     btnMic.disabled = true; btnRecStart.disabled = false;
 
     if(!detector) initDetector();
@@ -387,15 +396,13 @@ btnRecStop.onclick = () => stopRecording();
 btnMonOff.onclick = () => {
   monitorOn = false;
   btnMonOff.classList.add('active'); btnMonOn.classList.remove('active');
-  if (monitorGain) monitorGain.gain.value = 0.0001;  // OFF (inaudible, tirage conservé)
-  if (!mediaRecorder || mediaRecorder.state !== 'recording') startMonitor();
+  if (monitorGain) monitorGain.gain.value = 0.0001;  // OFF (inaudible)
   log('INFO', 'Moniteur OFF');
 };
 btnMonOn.onclick = () => {
   monitorOn = true;
   btnMonOn.classList.add('active'); btnMonOff.classList.remove('active');
-  if (monitorGain) monitorGain.gain.value = 1;       // ON
-  if (audioCtx) startMonitor();
+  if (monitorGain) monitorGain.gain.value = 1;       // ON (on s'entend)
   log('INFO', 'Moniteur ON');
 };
 

@@ -129,7 +129,7 @@ let audioCtx = null;
 let analyser = null;
 let micStream = null;
 let mediaRecorder = null;
-let monitorGain = null;          // <—— NOUVEAU
+let monitorGain = null;          // GAIN DE MONITORING (tirage)
 let chunks = [];
 let lastBlob = null;
 let detector = null;
@@ -216,13 +216,13 @@ async function activateMic(){
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 2048;
 
-    // ---- BRANCHEMENT QUI CORRIGE LE PROBLÈME ----
+    // ==== BRANCHEMENT EN PARALLÈLE (FIABLE FIREFOX) ====
     monitorGain = audioCtx.createGain();
-    monitorGain.gain.value = 0; // OFF par défaut
-    src.connect(analyser);
-    analyser.connect(monitorGain);
+    monitorGain.gain.value = 0.0001;        // OFF quasi muet, mais le graphe est tiré
+    src.connect(monitorGain);               // micro -> monitor (retour son)
+    src.connect(analyser);                  // micro -> analyser (branche dédiée)
     monitorGain.connect(audioCtx.destination);
-    // ---------------------------------------------
+    // ====================================================
 
     log('INFO','Analyser connecté + tirage vers destination');
     btnMic.disabled = true; btnRecStart.disabled = false;
@@ -333,7 +333,7 @@ btnDownWebM.onclick=()=>{ if(!lastBlob) return log('WARN','Aucun enregistrement'
 btnDownWAV.onclick=async()=>{ try{ if(!lastBlob) return log('WARN','Aucun enregistrement'); if(!window.WAVExport) return log('ERROR','WAVExport indisponible');
   const wav=await WAVExport.fromWebM(lastBlob); if(!wav) return log('ERROR','Conversion WAV échouée'); downloadBlob(wav,'take.wav'); }catch(e){ log('ERROR','WAV download: '+e.message); } };
 btnDownMP3.onclick=async()=>{ try{ if(!lastBlob) return log('WARN','Aucun enregistrement'); if(!window.WAVExport) return log('ERROR','WAVExport indisponible'); if(!window.MP3Export) return log('ERROR','MP3Export indisponible');
-  const wav=await WAVExport.fromWebM(lastBlob); if(!wav) return log('ERROR','Conversion WAV échouée'); log('INFO','Encodage MP3 en cours...'); const mp3=await MP3Export.fromWav(wav);
+  const wav=await WAVExport.fromWebM(lastBlob); if(!wav) return log('ERROR','Conversion MP3 échouée'); log('INFO','Encodage MP3 en cours...'); const mp3=await MP3Export.fromWav(wav);
   if(!mp3) return log('ERROR','Conversion MP3 échouée'); downloadBlob(mp3,'take.mp3'); }catch(e){ log('ERROR','MP3 download: '+e.message); } };
 btnClearRec.onclick=()=>{ chunks=[]; lastBlob=null; recordedPitch=[]; recordDetectionCount=0; recordDetectionRawCount=0; updateTimer(0); drawCanvasRec(); debugRec.textContent='Détections brutes: 0 | Points lissés: 0'; log('INFO','Enregistrement effacé'); };
 
@@ -385,15 +385,14 @@ btnRecStop.onclick = () => stopRecording();
 btnMonOff.onclick = () => {
   monitorOn = false;
   btnMonOff.classList.add('active'); btnMonOn.classList.remove('active');
-  if (monitorGain) monitorGain.gain.value = 0;   // <—— MUTE mais graphe toujours “tiré”
-  // on peut laisser le monitor visuel actif
+  if (monitorGain) monitorGain.gain.value = 0.0001;  // OFF (tirage conservé)
   if (!mediaRecorder || mediaRecorder.state !== 'recording') startMonitor();
   log('INFO', 'Moniteur OFF');
 };
 btnMonOn.onclick = () => {
   monitorOn = true;
   btnMonOn.classList.add('active'); btnMonOff.classList.remove('active');
-  if (monitorGain) monitorGain.gain.value = 1;   // <—— SON ON
+  if (monitorGain) monitorGain.gain.value = 1;       // ON (on s’entend)
   if (audioCtx) startMonitor();
   log('INFO', 'Moniteur ON');
 };

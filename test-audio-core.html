@@ -285,7 +285,7 @@ input[type="file"] {
   <div class="cols">
     <div class="panel">
       <p class="h2">🎙️ Ta prise (micro)</p>
-      <div class="hint">Courbe bleue = ton pitch lissé. Ligne verte = 0 cent (440 Hz).</div>
+      <div class="hint">Courbe bleue = ton pitch lissé. Ligne verte = 0 cent (autour de ta note courante).</div>
       <div class="canvasWrap">
         <canvas id="canvasRec" width="600" height="320"></canvas>
       </div>
@@ -360,9 +360,23 @@ let refData = { pitch: [], duration: 0 };
 let refDetectionCount = 0;
 
 const canvasRec = document.getElementById('canvasRec');
-const ctxRec = canvasRec.getContext('2d');
 const canvasRef = document.getElementById('canvasRef');
-const ctxRef = canvasRef.getContext('2d');
+
+/* ====== HiDPI net (optionnel, sûr) ====== */
+function fitHiDPICanvas(canvas) {
+  const ratio = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width && rect.height) {
+    canvas.width  = Math.round(rect.width  * ratio);
+    canvas.height = Math.round(rect.height * ratio);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    return ctx;
+  }
+  return canvas.getContext('2d');
+}
+const ctxRec = fitHiDPICanvas(canvasRec);
+const ctxRef = fitHiDPICanvas(canvasRef);
 
 const btnMic = document.getElementById('btnMic');
 const btnRecStart = document.getElementById('btnRecStart');
@@ -423,24 +437,20 @@ function drawCanvasRec() {
     ctxRec.textAlign = 'left';
     ctxRec.fillText('-60c', 65, 16);
 
-    // Grille verticale et labels de temps (abscisses)
+    // Grille verticale et labels de temps (abscisses) — base 120 s
     ctxRec.strokeStyle = '#22304f';
     ctxRec.lineWidth = 0.5;
     ctxRec.fillStyle = '#9ca3af';
     ctxRec.font = '10px monospace';
     ctxRec.textAlign = 'center';
     
-    // Graduations toutes les 5 secondes
     for (let sec = 0; sec <= 120; sec += 5) {
       const x = 60 + (w - 80) * (sec / 120);
       if (x < w - 20) {
-        // Ligne verticale
         ctxRec.beginPath();
         ctxRec.moveTo(x, 0);
         ctxRec.lineTo(x, h);
         ctxRec.stroke();
-        
-        // Label temps en bas
         ctxRec.fillText(sec + 's', x, h - 4);
       }
     }
@@ -483,7 +493,7 @@ function drawCanvasRef() {
     ctxRef.textAlign = 'left';
     ctxRef.fillText('-60c', 65, 16);
 
-    // Abscisses pour référence
+    // Abscisses pour référence en fonction de la durée analysée
     ctxRef.strokeStyle = '#22304f';
     ctxRef.lineWidth = 0.5;
     ctxRef.fillStyle = '#9ca3af';
@@ -498,7 +508,6 @@ function drawCanvasRef() {
         ctxRef.moveTo(x, 0);
         ctxRef.lineTo(x, h);
         ctxRef.stroke();
-        
         ctxRef.fillText(sec + 's', x, h - 4);
       }
     }
@@ -513,9 +522,17 @@ function mapCentsToY(cents, height) {
   return midY - (cents / centsPerPixel);
 }
 
-function hzToCents(hz, ref = 440) {
-  if (hz <= 0) return 0;
-  return 1200 * Math.log2(hz / ref);
+/* ==================== CENTS : RELATIFS À LA NOTE LA PLUS PROCHE ==================== */
+// cents absolus vs A4 (utile comme base)
+function hzToCentsFromA4(hz) {
+  if (!hz || hz <= 0) return 0;
+  return 1200 * Math.log2(hz / 440);
+}
+// cents relatifs autour du demi-ton le plus proche → typiquement dans [-50c, +50c]
+function centsRelativeToNearestSemitone(hz) {
+  const centsFromA4 = hzToCentsFromA4(hz);
+  const nearestSemitone = Math.round(centsFromA4 / 100) * 100;
+  return centsFromA4 - nearestSemitone;
 }
 
 /* ==================== AUDIO INIT ==================== */
@@ -687,10 +704,10 @@ function startMonitor() {
     const buf = new Float32Array(analyser.fftSize);
 
     function tick() {
-      // Redessiner la base (grille + labels) SANS effacer la courbe
+      // Base (grille + labels)
       drawCanvasRec();
 
-      // Redessiner TOUS les points accumulés
+      // Tracer tous les points accumulés
       if (recordedPitch.length > 0) {
         ctxRec.strokeStyle = '#3b82f6';
         ctxRec.lineWidth = 2.5;
@@ -700,16 +717,12 @@ function startMonitor() {
 
         for (let i = 0; i < recordedPitch.length; i++) {
           const p = recordedPitch[i];
-          if (i === 0) {
-            ctxRec.moveTo(p.x, p.y);
-          } else {
-            ctxRec.lineTo(p.x, p.y);
-          }
+          if (i === 0) ctxRec.moveTo(p.x, p.y);
+          else ctxRec.lineTo(p.x, p.y);
         }
-
         ctxRec.stroke();
 
-        // Redessiner les points
+        // Petits points
         ctxRec.fillStyle = '#3b82f6';
         for (const p of recordedPitch) {
           ctxRec.beginPath();
@@ -727,12 +740,12 @@ function startMonitor() {
           recordDetectionRawCount++;
 
           let smoothedHz = hz;
-          if (smoother) {
-            smoothedHz = smoother.smooth(hz);
-          }
+          if (smoother) smoothedHz = smoother.smooth(hz);
 
           if (smoothedHz && smoothedHz > 0) {
-            const cents = hzToCents(smoothedHz, 440);
+            // *** CHANGEMENT ICI : cents relatifs autour de la note la plus proche ***
+            const cents = centsRelativeToNearestSemitone(smoothedHz);
+
             const elapsed = audioCtx.currentTime - recStart;
             const x = 60 + (canvasRec.width - 80) * Math.min(elapsed / 120, 1);
             const y = mapCentsToY(cents, canvasRec.height);
@@ -880,7 +893,7 @@ btnClearRef.onclick = () => {
   }
 };
 
-/* ==================== PITCH EXTRACTION ==================== */
+/* ==================== PITCH EXTRACTION (RÉFÉRENCE) ==================== */
 function extractPitch(samples, sr) {
   try {
     if (!detector) return [];
@@ -902,14 +915,13 @@ function extractPitch(samples, sr) {
         rawCount++;
 
         let smoothedHz = hz;
-        if (smoother) {
-          smoothedHz = smoother.smooth(hz);
-        }
+        if (smoother) smoothedHz = smoother.smooth(hz);
 
         if (smoothedHz && smoothedHz > 0) {
           detectionCount++;
           const t = i / sr;
-          const cents = hzToCents(smoothedHz, 440);
+          // *** CHANGEMENT ICI : cents relatifs ***
+          const cents = centsRelativeToNearestSemitone(smoothedHz);
           result.push({ t, hz: smoothedHz, cents });
         }
       }

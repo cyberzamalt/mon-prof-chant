@@ -151,6 +151,7 @@ body {
   padding: 4px;
   background: #0b1324;
   margin: 8px 0;
+  position: relative;
 }
 
 canvas {
@@ -346,11 +347,10 @@ let mediaRecorder = null;
 let chunks = [];
 let lastBlob = null;
 let detector = null;
-let smoother = null; // ← NOUVEAU: Instance du PitchSmoother
+let smoother = null;
 let recordedPitch = [];
-let recordedPitchSmoothed = []; // ← NOUVEAU: Pitch lissé
 let recordDetectionCount = 0;
-let recordDetectionRawCount = 0; // ← NOUVEAU: Détections brutes
+let recordDetectionRawCount = 0;
 let recStart = 0;
 let timerInterval = null;
 let rafId = null;
@@ -386,83 +386,125 @@ const btnClearRef = document.getElementById('btnClearRef');
 
 /* ==================== CANVAS HELPERS ==================== */
 function drawCanvasRec() {
-  const w = canvasRec.width;
-  const h = canvasRec.height;
-  ctxRec.fillStyle = '#0b1324';
-  ctxRec.fillRect(0, 0, w, h);
+  try {
+    const w = canvasRec.width;
+    const h = canvasRec.height;
+    
+    // Fond
+    ctxRec.fillStyle = '#0b1324';
+    ctxRec.fillRect(0, 0, w, h);
 
-  ctxRec.strokeStyle = '#22304f';
-  ctxRec.lineWidth = 1;
-  ctxRec.beginPath();
-  ctxRec.moveTo(0, h / 2);
-  ctxRec.lineTo(w, h / 2);
-  ctxRec.stroke();
-
-  for (let i = 0; i < 5; i++) {
-    const y = (h / 4) * i;
+    // Grille horizontale fine
     ctxRec.strokeStyle = '#1a2642';
     ctxRec.lineWidth = 0.5;
+    for (let i = 0; i < 5; i++) {
+      const y = (h / 4) * i;
+      ctxRec.beginPath();
+      ctxRec.moveTo(0, y);
+      ctxRec.lineTo(w, y);
+      ctxRec.stroke();
+    }
+
+    // Ligne de référence (0 cents) - verte en tirets
+    ctxRec.strokeStyle = '#10b981';
+    ctxRec.lineWidth = 2;
+    ctxRec.setLineDash([4, 4]);
     ctxRec.beginPath();
-    ctxRec.moveTo(0, y);
-    ctxRec.lineTo(w, y);
+    ctxRec.moveTo(0, h / 2);
+    ctxRec.lineTo(w, h / 2);
     ctxRec.stroke();
+    ctxRec.setLineDash([]);
+
+    // Labels Y (cents)
+    ctxRec.fillStyle = '#9ca3af';
+    ctxRec.font = '11px monospace';
+    ctxRec.textAlign = 'right';
+    ctxRec.fillText('+60c', 55, 16);
+    ctxRec.textAlign = 'left';
+    ctxRec.fillText('-60c', 65, 16);
+
+    // Grille verticale et labels de temps (abscisses)
+    ctxRec.strokeStyle = '#22304f';
+    ctxRec.lineWidth = 0.5;
+    ctxRec.fillStyle = '#9ca3af';
+    ctxRec.font = '10px monospace';
+    ctxRec.textAlign = 'center';
+    
+    // Graduations toutes les 5 secondes
+    for (let sec = 0; sec <= 120; sec += 5) {
+      const x = 60 + (w - 80) * (sec / 120);
+      if (x < w - 20) {
+        // Ligne verticale
+        ctxRec.beginPath();
+        ctxRec.moveTo(x, 0);
+        ctxRec.lineTo(x, h);
+        ctxRec.stroke();
+        
+        // Label temps en bas
+        ctxRec.fillText(sec + 's', x, h - 4);
+      }
+    }
+  } catch (err) {
+    console.error('drawCanvasRec error:', err);
   }
-
-  ctxRec.strokeStyle = '#10b981';
-  ctxRec.lineWidth = 2;
-  ctxRec.setLineDash([4, 4]);
-  ctxRec.beginPath();
-  ctxRec.moveTo(0, h / 2);
-  ctxRec.lineTo(w, h / 2);
-  ctxRec.stroke();
-  ctxRec.setLineDash([]);
-
-  ctxRec.fillStyle = '#9ca3af';
-  ctxRec.font = '11px monospace';
-  ctxRec.textAlign = 'right';
-  ctxRec.fillText('60c', 55, 16);
-  ctxRec.textAlign = 'left';
-  ctxRec.fillText('-60c', 65, 16);
 }
 
 function drawCanvasRef() {
-  const w = canvasRef.width;
-  const h = canvasRef.height;
-  ctxRef.fillStyle = '#0b1324';
-  ctxRef.fillRect(0, 0, w, h);
+  try {
+    const w = canvasRef.width;
+    const h = canvasRef.height;
+    
+    ctxRef.fillStyle = '#0b1324';
+    ctxRef.fillRect(0, 0, w, h);
 
-  ctxRef.strokeStyle = '#22304f';
-  ctxRef.lineWidth = 1;
-  ctxRef.beginPath();
-  ctxRef.moveTo(0, h / 2);
-  ctxRef.lineTo(w, h / 2);
-  ctxRef.stroke();
-
-  for (let i = 0; i < 5; i++) {
-    const y = (h / 4) * i;
     ctxRef.strokeStyle = '#1a2642';
     ctxRef.lineWidth = 0.5;
+    for (let i = 0; i < 5; i++) {
+      const y = (h / 4) * i;
+      ctxRef.beginPath();
+      ctxRef.moveTo(0, y);
+      ctxRef.lineTo(w, y);
+      ctxRef.stroke();
+    }
+
+    ctxRef.strokeStyle = '#10b981';
+    ctxRef.lineWidth = 2;
+    ctxRef.setLineDash([4, 4]);
     ctxRef.beginPath();
-    ctxRef.moveTo(0, y);
-    ctxRef.lineTo(w, y);
+    ctxRef.moveTo(0, h / 2);
+    ctxRef.lineTo(w, h / 2);
     ctxRef.stroke();
+    ctxRef.setLineDash([]);
+
+    ctxRef.fillStyle = '#9ca3af';
+    ctxRef.font = '11px monospace';
+    ctxRef.textAlign = 'right';
+    ctxRef.fillText('+60c', 55, 16);
+    ctxRef.textAlign = 'left';
+    ctxRef.fillText('-60c', 65, 16);
+
+    // Abscisses pour référence
+    ctxRef.strokeStyle = '#22304f';
+    ctxRef.lineWidth = 0.5;
+    ctxRef.fillStyle = '#9ca3af';
+    ctxRef.font = '10px monospace';
+    ctxRef.textAlign = 'center';
+    
+    const maxDur = Math.max(refData.duration, 1);
+    for (let sec = 0; sec <= Math.ceil(maxDur); sec += Math.max(1, Math.floor(maxDur / 10))) {
+      const x = 60 + (w - 80) * (sec / maxDur);
+      if (x < w - 20) {
+        ctxRef.beginPath();
+        ctxRef.moveTo(x, 0);
+        ctxRef.lineTo(x, h);
+        ctxRef.stroke();
+        
+        ctxRef.fillText(sec + 's', x, h - 4);
+      }
+    }
+  } catch (err) {
+    console.error('drawCanvasRef error:', err);
   }
-
-  ctxRef.strokeStyle = '#10b981';
-  ctxRef.lineWidth = 2;
-  ctxRef.setLineDash([4, 4]);
-  ctxRef.beginPath();
-  ctxRef.moveTo(0, h / 2);
-  ctxRef.lineTo(w, h / 2);
-  ctxRef.stroke();
-  ctxRef.setLineDash([]);
-
-  ctxRef.fillStyle = '#9ca3af';
-  ctxRef.font = '11px monospace';
-  ctxRef.textAlign = 'right';
-  ctxRef.fillText('60c', 55, 16);
-  ctxRef.textAlign = 'left';
-  ctxRef.fillText('-60c', 65, 16);
 }
 
 function mapCentsToY(cents, height) {
@@ -478,18 +520,18 @@ function hzToCents(hz, ref = 440) {
 
 /* ==================== AUDIO INIT ==================== */
 async function ensureAudio() {
-  if (!audioCtx) {
-    try {
+  try {
+    if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       log('INFO', 'AudioContext créé');
-    } catch (err) {
-      log('ERROR', 'AudioContext: ' + err.message);
-      throw err;
     }
-  }
-  if (audioCtx.state === 'suspended') {
-    await audioCtx.resume();
-    log('INFO', 'AudioContext repris');
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume();
+      log('INFO', 'AudioContext repris');
+    }
+  } catch (err) {
+    log('ERROR', 'AudioContext: ' + err.message);
+    throw err;
   }
 }
 
@@ -514,46 +556,51 @@ async function activateMic() {
     btnRecStart.disabled = false;
 
     if (!detector) initDetector();
-    if (!smoother) initSmoother(); // ← NOUVEAU: Initialiser le smoother
+    if (!smoother) initSmoother();
 
   } catch (err) {
     log('ERROR', 'Mic: ' + err.message);
   }
 }
 
-/* ==================== PITCH DETECTION (NOUVEAU) ==================== */
+/* ==================== PITCH DETECTION ==================== */
 function initDetector() {
-  if (typeof PitchyLite === 'undefined') {
-    log('ERROR', 'PitchyLite non disponible');
+  try {
+    if (typeof PitchyLite === 'undefined') {
+      throw new Error('PitchyLite non disponible');
+    }
+
+    detector = new PitchyLite(audioCtx.sampleRate);
+    log('INFO', 'Détecteur pitch (PitchyLite) initialisé');
+    pitchyStatus.textContent = 'Détecteur: OK';
+    pitchyStatus.className = 'badge ok';
+    return true;
+  } catch (err) {
+    log('ERROR', 'initDetector: ' + err.message);
     pitchyStatus.textContent = 'Détecteur: ERREUR';
     pitchyStatus.className = 'badge err';
     return false;
   }
-
-  detector = new PitchyLite(audioCtx.sampleRate);
-  log('INFO', 'Détecteur pitch (PitchyLite) initialisé');
-  pitchyStatus.textContent = 'Détecteur: OK';
-  pitchyStatus.className = 'badge ok';
-  return true;
 }
 
-/* ==================== PITCH SMOOTHER (NOUVEAU) ==================== */
+/* ==================== PITCH SMOOTHER ==================== */
 function initSmoother() {
-  if (typeof PitchSmoother === 'undefined') {
-    log('WARN', 'PitchSmoother non disponible - utilisation détections brutes');
-    return false;
-  }
-
   try {
+    if (typeof PitchSmoother === 'undefined') {
+      log('WARN', 'PitchSmoother non disponible');
+      return false;
+    }
+
     smoother = new PitchSmoother({
-      medianSize: 5,
+      medianWindowSize: 5,
       smoothingFactor: 0.7,
-      jumpThreshold: 1.5
+      maxPitchJump: 100,
+      minConfidence: 0.3
     });
-    log('INFO', 'PitchSmoother initialisé (médian + EMA + validation)');
+    log('INFO', 'PitchSmoother initialisé');
     return true;
   } catch (err) {
-    log('WARN', 'PitchSmoother init failed: ' + err.message);
+    log('WARN', 'initSmoother: ' + err.message);
     return false;
   }
 }
@@ -566,124 +613,149 @@ function updateTimer(secs) {
 }
 
 function startRecording() {
-  if (!micStream) {
-    log('WARN', 'Activez d\'abord le micro');
-    return;
-  }
-
-  if (!detector) {
-    initDetector();
-  }
-
-  if (!smoother) {
-    initSmoother();
-  }
-
-  chunks = [];
-  lastBlob = null;
-  recordedPitch = [];
-  recordedPitchSmoothed = []; // ← NOUVEAU: Reset
-  recordDetectionCount = 0;
-  recordDetectionRawCount = 0; // ← NOUVEAU: Reset
-  recStart = audioCtx.currentTime;
-
-  const options = {
-    mimeType: 'audio/webm;codecs=opus',
-    audioBitsPerSecond: 128000,
-  };
-
-  mediaRecorder = new MediaRecorder(micStream, options);
-  mediaRecorder.ondataavailable = (e) => {
-    if (e.data && e.data.size > 0) {
-      chunks.push(e.data);
+  try {
+    if (!micStream) {
+      log('WARN', 'Activez d\'abord le micro');
+      return;
     }
-  };
-  mediaRecorder.onstop = () => {
-    if (chunks.length > 0) {
-      lastBlob = new Blob(chunks, { type: 'audio/webm' });
-      log('INFO', 'Enregistrement terminé');
-    }
-  };
 
-  mediaRecorder.start(100);
-  btnRecStart.disabled = true;
-  btnRecStop.disabled = false;
+    if (!detector) initDetector();
+    if (!smoother) initSmoother();
 
-  timerInterval = setInterval(() => {
-    const elapsed = audioCtx.currentTime - recStart;
-    updateTimer(elapsed);
-  }, 100);
+    chunks = [];
+    lastBlob = null;
+    recordedPitch = [];
+    recordDetectionCount = 0;
+    recordDetectionRawCount = 0;
+    recStart = audioCtx.currentTime;
 
-  log('INFO', 'Enregistrement démarré');
-  startMonitor();
+    const options = {
+      mimeType: 'audio/webm;codecs=opus',
+      audioBitsPerSecond: 128000,
+    };
+
+    mediaRecorder = new MediaRecorder(micStream, options);
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) {
+        chunks.push(e.data);
+      }
+    };
+    mediaRecorder.onstop = () => {
+      if (chunks.length > 0) {
+        lastBlob = new Blob(chunks, { type: 'audio/webm' });
+        log('INFO', 'Enregistrement terminé');
+      }
+    };
+
+    mediaRecorder.start(100);
+    btnRecStart.disabled = true;
+    btnRecStop.disabled = false;
+
+    timerInterval = setInterval(() => {
+      const elapsed = audioCtx.currentTime - recStart;
+      updateTimer(elapsed);
+    }, 100);
+
+    log('INFO', 'Enregistrement démarré');
+    startMonitor();
+  } catch (err) {
+    log('ERROR', 'startRecording: ' + err.message);
+  }
 }
 
 function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state === 'recording') {
-    mediaRecorder.stop();
-    btnRecStart.disabled = false;
-    btnRecStop.disabled = true;
-    clearInterval(timerInterval);
-    updateTimer(0);
-    stopMonitor();
+  try {
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+      mediaRecorder.stop();
+      btnRecStart.disabled = false;
+      btnRecStop.disabled = true;
+      clearInterval(timerInterval);
+      updateTimer(0);
+      stopMonitor();
+    }
+  } catch (err) {
+    log('ERROR', 'stopRecording: ' + err.message);
   }
 }
 
-/* ==================== MONITOR LIVE (MODIFIÉ) ==================== */
+/* ==================== MONITOR LIVE (SINUSOÏDE EN TEMPS RÉEL) ==================== */
 function startMonitor() {
-  if (!detector || !analyser) return;
-  if (rafId) return;
+  try {
+    if (!detector || !analyser) return;
+    if (rafId) return;
 
-  const buf = new Float32Array(analyser.fftSize);
+    const buf = new Float32Array(analyser.fftSize);
 
-  function tick() {
-    drawCanvasRec();
+    function tick() {
+      // Redessiner la base (grille + labels) SANS effacer la courbe
+      drawCanvasRec();
 
-    analyser.getFloatTimeDomainData(buf);
-    const hz = detector.detect(buf);
-
-    if (hz && hz > 0) {
-      recordDetectionRawCount++; // ← NOUVEAU: Compter détections brutes
-
-      // ← NOUVEAU: Passer par le smoother
-      let smoothedHz = hz;
-      if (smoother) {
-        smoothedHz = smoother.smooth(hz);   // ✅ CORRECT
-      }
-
-      const cents = hzToCents(smoothedHz, 440);
-      const elapsed = audioCtx.currentTime - recStart;
-      const x = 60 + (canvasRec.width - 80) * Math.min(elapsed / 120, 1);
-      const y = mapCentsToY(cents, canvasRec.height);
-
-      recordedPitch.push({ t: elapsed, hz: smoothedHz, cents, x, y }); // ← Lissé
-      recordDetectionCount++;
-
-      if (recordedPitch.length > 1) {
-        const prev = recordedPitch[recordedPitch.length - 2];
+      // Redessiner TOUS les points accumulés
+      if (recordedPitch.length > 0) {
         ctxRec.strokeStyle = '#3b82f6';
-        ctxRec.lineWidth = 2;
+        ctxRec.lineWidth = 2.5;
+        ctxRec.lineJoin = 'round';
+        ctxRec.lineCap = 'round';
         ctxRec.beginPath();
-        ctxRec.moveTo(prev.x, prev.y);
-        ctxRec.lineTo(x, y);
+
+        for (let i = 0; i < recordedPitch.length; i++) {
+          const p = recordedPitch[i];
+          if (i === 0) {
+            ctxRec.moveTo(p.x, p.y);
+          } else {
+            ctxRec.lineTo(p.x, p.y);
+          }
+        }
+
         ctxRec.stroke();
+
+        // Redessiner les points
+        ctxRec.fillStyle = '#3b82f6';
+        for (const p of recordedPitch) {
+          ctxRec.beginPath();
+          ctxRec.arc(p.x, p.y, 2, 0, Math.PI * 2);
+          ctxRec.fill();
+        }
       }
 
-      ctxRec.fillStyle = '#3b82f6';
-      ctxRec.beginPath();
-      ctxRec.arc(x, y, 2.5, 0, Math.PI * 2);
-      ctxRec.fill();
+      // Détecter le pitch et ajouter un nouveau point
+      try {
+        analyser.getFloatTimeDomainData(buf);
+        const hz = detector.detect(buf);
+
+        if (hz && hz > 0) {
+          recordDetectionRawCount++;
+
+          let smoothedHz = hz;
+          if (smoother) {
+            smoothedHz = smoother.smooth(hz);
+          }
+
+          if (smoothedHz && smoothedHz > 0) {
+            const cents = hzToCents(smoothedHz, 440);
+            const elapsed = audioCtx.currentTime - recStart;
+            const x = 60 + (canvasRec.width - 80) * Math.min(elapsed / 120, 1);
+            const y = mapCentsToY(cents, canvasRec.height);
+
+            recordedPitch.push({ t: elapsed, hz: smoothedHz, cents, x, y });
+            recordDetectionCount++;
+          }
+        }
+      } catch (err) {
+        console.error('Pitch detection error:', err);
+      }
+
+      debugRec.textContent = `Détections brutes: ${recordDetectionRawCount} | Points lissés: ${recordDetectionCount}`;
+
+      if (monitorOn || (mediaRecorder && mediaRecorder.state === 'recording')) {
+        rafId = requestAnimationFrame(tick);
+      }
     }
 
-    // ← NOUVEAU: Afficher détections brutes vs lissées
-    debugRec.textContent = `Détections brutes: ${recordDetectionRawCount} | Points lissés: ${recordDetectionCount}`;
-
-    if (monitorOn || (mediaRecorder && mediaRecorder.state === 'recording')) {
-      rafId = requestAnimationFrame(tick);
-    }
+    tick();
+  } catch (err) {
+    log('ERROR', 'startMonitor: ' + err.message);
   }
-
-  tick();
 }
 
 function stopMonitor() {
@@ -696,15 +768,19 @@ function stopMonitor() {
 
 /* ==================== EXPORTS ==================== */
 function downloadBlob(blob, name) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  log('INFO', `Téléchargé: ${name}`);
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    log('INFO', `Téléchargé: ${name}`);
+  } catch (err) {
+    log('ERROR', 'downloadBlob: ' + err.message);
+  }
 }
 
 btnDownWebM.onclick = () => {
@@ -713,19 +789,23 @@ btnDownWebM.onclick = () => {
 };
 
 btnDownWAV.onclick = async () => {
-  if (!lastBlob) return log('WARN', 'Aucun enregistrement');
-  if (!window.WAVExport) return log('ERROR', 'WAVExport indisponible');
-  const wav = await WAVExport.fromWebM(lastBlob);
-  if (!wav) return log('ERROR', 'Conversion WAV échouée');
-  downloadBlob(wav, 'take.wav');
+  try {
+    if (!lastBlob) return log('WARN', 'Aucun enregistrement');
+    if (!window.WAVExport) return log('ERROR', 'WAVExport indisponible');
+    const wav = await WAVExport.fromWebM(lastBlob);
+    if (!wav) return log('ERROR', 'Conversion WAV échouée');
+    downloadBlob(wav, 'take.wav');
+  } catch (err) {
+    log('ERROR', 'WAV download: ' + err.message);
+  }
 };
 
 btnDownMP3.onclick = async () => {
-  if (!lastBlob) return log('WARN', 'Aucun enregistrement');
-  if (!window.WAVExport) return log('ERROR', 'WAVExport indisponible');
-  if (!window.MP3Export) return log('ERROR', 'MP3Export indisponible');
-
   try {
+    if (!lastBlob) return log('WARN', 'Aucun enregistrement');
+    if (!window.WAVExport) return log('ERROR', 'WAVExport indisponible');
+    if (!window.MP3Export) return log('ERROR', 'MP3Export indisponible');
+
     const wav = await WAVExport.fromWebM(lastBlob);
     if (!wav) return log('ERROR', 'Conversion WAV échouée');
     log('INFO', 'Encodage MP3 en cours...');
@@ -733,29 +813,32 @@ btnDownMP3.onclick = async () => {
     if (!mp3) return log('ERROR', 'Conversion MP3 échouée');
     downloadBlob(mp3, 'take.mp3');
   } catch (err) {
-    log('ERROR', 'MP3: ' + err.message);
+    log('ERROR', 'MP3 download: ' + err.message);
   }
 };
 
 btnClearRec.onclick = () => {
-  chunks = [];
-  lastBlob = null;
-  recordedPitch = [];
-  recordedPitchSmoothed = [];
-  recordDetectionCount = 0;
-  recordDetectionRawCount = 0;
-  updateTimer(0);
-  drawCanvasRec();
-  debugRec.textContent = 'Détections brutes: 0 | Points lissés: 0';
-  log('INFO', 'Enregistrement effacé');
+  try {
+    chunks = [];
+    lastBlob = null;
+    recordedPitch = [];
+    recordDetectionCount = 0;
+    recordDetectionRawCount = 0;
+    updateTimer(0);
+    drawCanvasRec();
+    debugRec.textContent = 'Détections brutes: 0 | Points lissés: 0';
+    log('INFO', 'Enregistrement effacé');
+  } catch (err) {
+    log('ERROR', 'Clear rec: ' + err.message);
+  }
 };
 
 /* ==================== FILE UPLOADS ==================== */
 fileUploadRec.addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-
   try {
+    const file = e.target.files[0];
+    if (!file) return;
+
     await ensureAudio();
     const buf = await file.arrayBuffer();
     lastBlob = new Blob([buf], { type: file.type });
@@ -767,10 +850,10 @@ fileUploadRec.addEventListener('change', async (e) => {
 });
 
 fileUploadRef.addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-
   try {
+    const file = e.target.files[0];
+    if (!file) return;
+
     await ensureAudio();
     const buf = await file.arrayBuffer();
     const audio = await audioCtx.decodeAudioData(buf);
@@ -786,94 +869,120 @@ fileUploadRef.addEventListener('change', async (e) => {
 });
 
 btnClearRef.onclick = () => {
-  refData = { pitch: [], duration: 0 };
-  refDetectionCount = 0;
-  drawCanvasRef();
-  debugRef.textContent = 'Détections brutes: 0 | Points lissés: 0';
-  log('INFO', 'Référence effacée');
+  try {
+    refData = { pitch: [], duration: 0 };
+    refDetectionCount = 0;
+    drawCanvasRef();
+    debugRef.textContent = 'Détections brutes: 0 | Points lissés: 0';
+    log('INFO', 'Référence effacée');
+  } catch (err) {
+    log('ERROR', 'Clear ref: ' + err.message);
+  }
 };
 
-/* ==================== PITCH EXTRACTION (MODIFIÉ) ==================== */
+/* ==================== PITCH EXTRACTION ==================== */
 function extractPitch(samples, sr) {
-  if (!detector) return [];
+  try {
+    if (!detector) return [];
 
-  const result = [];
-  const win = 2048;
-  const hop = 512;
-  let detectionCount = 0;
-  let rawCount = 0;
+    const result = [];
+    const win = 2048;
+    const hop = 512;
+    let detectionCount = 0;
+    let rawCount = 0;
 
-  // ← NOUVEAU: Réinitialiser le smoother pour la référence
-  if (smoother) {
-    smoother.reset();
-  }
-
-  for (let i = 0; i + win <= samples.length; i += hop) {
-    const slice = samples.subarray(i, i + win);
-    const hz = detector.detect(slice);
-    if (hz && hz > 0) {
-      rawCount++;
-
-      // ← NOUVEAU: Lisser via smoother
-      let smoothedHz = hz;
-      if (smoother) {
-        smoothedHz = smoother.smooth(hz);   // ✅ CORRECT
-      }
-
-      detectionCount++;
-      const t = i / sr;
-      const cents = hzToCents(smoothedHz, 440);
-      result.push({ t, hz: smoothedHz, cents });
+    if (smoother) {
+      smoother.reset();
     }
-  }
 
-  refDetectionCount = detectionCount;
-  log('INFO', `Extraction référence: ${rawCount} détections brutes → ${detectionCount} points lissés`);
-  return result;
+    for (let i = 0; i + win <= samples.length; i += hop) {
+      const slice = samples.subarray(i, i + win);
+      const hz = detector.detect(slice);
+      if (hz && hz > 0) {
+        rawCount++;
+
+        let smoothedHz = hz;
+        if (smoother) {
+          smoothedHz = smoother.smooth(hz);
+        }
+
+        if (smoothedHz && smoothedHz > 0) {
+          detectionCount++;
+          const t = i / sr;
+          const cents = hzToCents(smoothedHz, 440);
+          result.push({ t, hz: smoothedHz, cents });
+        }
+      }
+    }
+
+    refDetectionCount = detectionCount;
+    log('INFO', `Extraction référence: ${rawCount} brutes → ${detectionCount} lissées`);
+    return result;
+  } catch (err) {
+    log('ERROR', 'extractPitch: ' + err.message);
+    return [];
+  }
 }
 
 /* ==================== REFERENCE DRAWING ==================== */
 function drawReferenceData() {
-  drawCanvasRef();
+  try {
+    drawCanvasRef();
 
-  if (refData.pitch.length === 0) {
-    debugRef.textContent = 'Détections brutes: 0 | Points lissés: 0';
-    return;
-  }
-
-  const w = canvasRef.width;
-  const h = canvasRef.height;
-
-  ctxRef.strokeStyle = '#a78bfa';
-  ctxRef.lineWidth = 2;
-  ctxRef.beginPath();
-
-  let first = true;
-  for (const p of refData.pitch) {
-    const x = 60 + (w - 80) * (p.t / Math.max(refData.duration, 1));
-    const y = mapCentsToY(p.cents, h);
-
-    if (first) {
-      ctxRef.moveTo(x, y);
-      first = false;
-    } else {
-      ctxRef.lineTo(x, y);
+    if (refData.pitch.length === 0) {
+      debugRef.textContent = 'Détections brutes: 0 | Points lissés: 0';
+      return;
     }
-  }
 
-  ctxRef.stroke();
+    const w = canvasRef.width;
+    const h = canvasRef.height;
 
-  debugRef.textContent = `Détections brutes: ? | Points lissés: ${refData.pitch.length}`;
+    // Tracer la courbe
+    ctxRef.strokeStyle = '#a78bfa';
+    ctxRef.lineWidth = 2.5;
+    ctxRef.lineJoin = 'round';
+    ctxRef.lineCap = 'round';
+    ctxRef.beginPath();
 
-  if (refData.pitch.length > 0) {
-    const devs = refData.pitch.map(p => Math.abs(p.cents));
-    const avg = devs.reduce((a, b) => a + b, 0) / devs.length;
-    const max = Math.max(...devs);
-    const inTune = refData.pitch.filter(p => Math.abs(p.cents) < 25).length / refData.pitch.length * 100;
+    let first = true;
+    for (const p of refData.pitch) {
+      const x = 60 + (w - 80) * (p.t / Math.max(refData.duration, 1));
+      const y = mapCentsToY(p.cents, h);
 
-    mAvg.textContent = avg.toFixed(1) + 'c';
-    mMax.textContent = max.toFixed(1) + 'c';
-    mInTune.textContent = inTune.toFixed(1) + '%';
+      if (first) {
+        ctxRef.moveTo(x, y);
+        first = false;
+      } else {
+        ctxRef.lineTo(x, y);
+      }
+    }
+
+    ctxRef.stroke();
+
+    // Points
+    ctxRef.fillStyle = '#a78bfa';
+    for (const p of refData.pitch) {
+      const x = 60 + (w - 80) * (p.t / Math.max(refData.duration, 1));
+      const y = mapCentsToY(p.cents, h);
+      ctxRef.beginPath();
+      ctxRef.arc(x, y, 2, 0, Math.PI * 2);
+      ctxRef.fill();
+    }
+
+    debugRef.textContent = `Détections brutes: ? | Points lissés: ${refData.pitch.length}`;
+
+    if (refData.pitch.length > 0) {
+      const devs = refData.pitch.map(p => Math.abs(p.cents));
+      const avg = devs.reduce((a, b) => a + b, 0) / devs.length;
+      const max = Math.max(...devs);
+      const inTune = refData.pitch.filter(p => Math.abs(p.cents) < 25).length / refData.pitch.length * 100;
+
+      mAvg.textContent = avg.toFixed(1) + 'c';
+      mMax.textContent = max.toFixed(1) + 'c';
+      mInTune.textContent = inTune.toFixed(1) + '%';
+    }
+  } catch (err) {
+    log('ERROR', 'drawReferenceData: ' + err.message);
   }
 }
 
@@ -898,7 +1007,7 @@ btnMonOn.onclick = () => {
   log('INFO', 'Moniteur ON');
 };
 
-log('INFO', 'Interface prête - Lissage YIN+Smoother activé');
+log('INFO', 'Interface prête - Sinusoïdes en temps réel + Abscisses activées');
 </script>
 
 </body>

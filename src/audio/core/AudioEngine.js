@@ -13,9 +13,9 @@
  * Utilisé par: TOUS les modules audio
  */
 
-import { Logger } from '../logging/Logger.js';
+import { Logger } from '../../logging/Logger.js';
 import { AudioContextManager } from './AudioContextManager.js';
-import { BrowserDetector } from '../utils/BrowserDetector.js';
+import { BrowserDetector } from '../../utils/BrowserDetector.js';
 
 class AudioEngine {
   static #instance = null;

@@ -13,8 +13,8 @@
  * Utilisé par: AudioEngine
  */
 
-import { Logger } from '../logging/Logger.js';
-import { BrowserDetector } from '../utils/BrowserDetector.js';
+import { Logger } from '../../logging/Logger.js';
+import { BrowserDetector } from '../../utils/BrowserDetector.js';
 
 class AudioContextManager {
   #audioContext = null;

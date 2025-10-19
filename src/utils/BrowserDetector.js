@@ -12,7 +12,7 @@
  * Utilisé par: AudioEngine, AudioContextManager, CompatibilityChecker
  */
 
-import { Logger } from './logging/Logger.js';
+import { Logger } from '../../logging/Logger.js';
 
 class BrowserDetector {
   static #detectionCache = null;

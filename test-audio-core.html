@@ -220,7 +220,7 @@ input[type="file"] {
   border: 1px solid #22304f;
   border-radius: 8px;
   background: #0f172a;
-  color: #fff;
+  color: var(--text);
   font-size: 13px;
 }
 
@@ -359,10 +359,6 @@ let monitorOn = false;
 let refData = { pitch: [], duration: 0 };
 let refDetectionCount = 0;
 
-/* >>> AJOUTS POUR LA SINUSOÏDALE (Firefox-safe) <<< */
-let micSource = null;  // garder la source vivante (évite GC)
-let pullGain  = null;  // tirer l'analyser vers la sortie (inaudible)
-
 const canvasRec = document.getElementById('canvasRec');
 const ctxRec = canvasRec.getContext('2d');
 const canvasRef = document.getElementById('canvasRef');
@@ -393,10 +389,12 @@ function drawCanvasRec() {
   try {
     const w = canvasRec.width;
     const h = canvasRec.height;
-
+    
+    // Fond
     ctxRec.fillStyle = '#0b1324';
     ctxRec.fillRect(0, 0, w, h);
 
+    // Grille horizontale fine
     ctxRec.strokeStyle = '#1a2642';
     ctxRec.lineWidth = 0.5;
     for (let i = 0; i < 5; i++) {
@@ -407,6 +405,7 @@ function drawCanvasRec() {
       ctxRec.stroke();
     }
 
+    // Ligne de référence (0 cents) - verte en tirets
     ctxRec.strokeStyle = '#10b981';
     ctxRec.lineWidth = 2;
     ctxRec.setLineDash([4, 4]);
@@ -416,6 +415,7 @@ function drawCanvasRec() {
     ctxRec.stroke();
     ctxRec.setLineDash([]);
 
+    // Labels Y (cents)
     ctxRec.fillStyle = '#9ca3af';
     ctxRec.font = '11px monospace';
     ctxRec.textAlign = 'right';
@@ -423,19 +423,24 @@ function drawCanvasRec() {
     ctxRec.textAlign = 'left';
     ctxRec.fillText('-60c', 65, 16);
 
+    // Grille verticale et labels de temps (abscisses)
     ctxRec.strokeStyle = '#22304f';
     ctxRec.lineWidth = 0.5;
     ctxRec.fillStyle = '#9ca3af';
     ctxRec.font = '10px monospace';
     ctxRec.textAlign = 'center';
-
+    
+    // Graduations toutes les 5 secondes
     for (let sec = 0; sec <= 120; sec += 5) {
       const x = 60 + (w - 80) * (sec / 120);
       if (x < w - 20) {
+        // Ligne verticale
         ctxRec.beginPath();
         ctxRec.moveTo(x, 0);
         ctxRec.lineTo(x, h);
         ctxRec.stroke();
+        
+        // Label temps en bas
         ctxRec.fillText(sec + 's', x, h - 4);
       }
     }
@@ -448,7 +453,7 @@ function drawCanvasRef() {
   try {
     const w = canvasRef.width;
     const h = canvasRef.height;
-
+    
     ctxRef.fillStyle = '#0b1324';
     ctxRef.fillRect(0, 0, w, h);
 
@@ -478,12 +483,13 @@ function drawCanvasRef() {
     ctxRef.textAlign = 'left';
     ctxRef.fillText('-60c', 65, 16);
 
+    // Abscisses pour référence
     ctxRef.strokeStyle = '#22304f';
     ctxRef.lineWidth = 0.5;
     ctxRef.fillStyle = '#9ca3af';
     ctxRef.font = '10px monospace';
     ctxRef.textAlign = 'center';
-
+    
     const maxDur = Math.max(refData.duration, 1);
     for (let sec = 0; sec <= Math.ceil(maxDur); sec += Math.max(1, Math.floor(maxDur / 10))) {
       const x = 60 + (w - 80) * (sec / maxDur);
@@ -492,6 +498,7 @@ function drawCanvasRef() {
         ctxRef.moveTo(x, 0);
         ctxRef.lineTo(x, h);
         ctxRef.stroke();
+        
         ctxRef.fillText(sec + 's', x, h - 4);
       }
     }
@@ -538,20 +545,11 @@ async function activateMic() {
     }
 
     if (!analyser) {
-      /* ==== CORRECTION ICI : branche analysée et tirée vers la sortie ==== */
-      micSource = audioCtx.createMediaStreamSource(micStream);   // garder la ref globale
-      analyser  = audioCtx.createAnalyser();
+      const src = audioCtx.createMediaStreamSource(micStream);
+      analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.0; // meilleure lecture de la forme d'onde
-
-      pullGain = audioCtx.createGain();
-      pullGain.gain.value = 0.0001;        // quasi muet, mais force le traitement (Firefox)
-
-      micSource.connect(analyser);
-      analyser.connect(pullGain);
-      pullGain.connect(audioCtx.destination);
-
-      log('INFO', 'Analyser connecté + tirage vers destination');
+      src.connect(analyser);
+      log('INFO', 'Analyser connecté');
     }
 
     btnMic.disabled = true;
@@ -689,23 +687,29 @@ function startMonitor() {
     const buf = new Float32Array(analyser.fftSize);
 
     function tick() {
-      // redessine la grille
+      // Redessiner la base (grille + labels) SANS effacer la courbe
       drawCanvasRec();
 
-      // courbe accumulée
+      // Redessiner TOUS les points accumulés
       if (recordedPitch.length > 0) {
         ctxRec.strokeStyle = '#3b82f6';
         ctxRec.lineWidth = 2.5;
         ctxRec.lineJoin = 'round';
         ctxRec.lineCap = 'round';
         ctxRec.beginPath();
+
         for (let i = 0; i < recordedPitch.length; i++) {
           const p = recordedPitch[i];
-          if (i === 0) ctxRec.moveTo(p.x, p.y);
-          else ctxRec.lineTo(p.x, p.y);
+          if (i === 0) {
+            ctxRec.moveTo(p.x, p.y);
+          } else {
+            ctxRec.lineTo(p.x, p.y);
+          }
         }
+
         ctxRec.stroke();
 
+        // Redessiner les points
         ctxRec.fillStyle = '#3b82f6';
         for (const p of recordedPitch) {
           ctxRec.beginPath();
@@ -714,25 +718,31 @@ function startMonitor() {
         }
       }
 
-      // détection + ajout d'un point
+      // Détecter le pitch et ajouter un nouveau point
       try {
         analyser.getFloatTimeDomainData(buf);
         const hz = detector.detect(buf);
+
         if (hz && hz > 0) {
           recordDetectionRawCount++;
+
           let smoothedHz = hz;
-          if (smoother) smoothedHz = smoother.smooth(hz);
+          if (smoother) {
+            smoothedHz = smoother.smooth(hz);
+          }
+
           if (smoothedHz && smoothedHz > 0) {
             const cents = hzToCents(smoothedHz, 440);
             const elapsed = audioCtx.currentTime - recStart;
             const x = 60 + (canvasRec.width - 80) * Math.min(elapsed / 120, 1);
             const y = mapCentsToY(cents, canvasRec.height);
+
             recordedPitch.push({ t: elapsed, hz: smoothedHz, cents, x, y });
             recordDetectionCount++;
           }
         }
       } catch (err) {
-        // ignore tick error
+        console.error('Pitch detection error:', err);
       }
 
       debugRec.textContent = `Détections brutes: ${recordDetectionRawCount} | Points lissés: ${recordDetectionCount}`;
@@ -927,6 +937,7 @@ function drawReferenceData() {
     const w = canvasRef.width;
     const h = canvasRef.height;
 
+    // Tracer la courbe
     ctxRef.strokeStyle = '#a78bfa';
     ctxRef.lineWidth = 2.5;
     ctxRef.lineJoin = 'round';
@@ -948,6 +959,7 @@ function drawReferenceData() {
 
     ctxRef.stroke();
 
+    // Points
     ctxRef.fillStyle = '#a78bfa';
     for (const p of refData.pitch) {
       const x = 60 + (w - 80) * (p.t / Math.max(refData.duration, 1));
@@ -994,10 +1006,6 @@ btnMonOn.onclick = () => {
   if (audioCtx) startMonitor();
   log('INFO', 'Moniteur ON');
 };
-
-/* Dessin initial des grilles (barre verte visible dès le départ) */
-drawCanvasRec();
-drawCanvasRef();
 
 log('INFO', 'Interface prête - Sinusoïdes en temps réel + Abscisses activées');
 </script>

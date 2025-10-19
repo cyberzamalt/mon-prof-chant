@@ -12,7 +12,7 @@
  * Utilisé par: PitchDetector, RecorderService, app.js
  */
 
-import { Logger } from '../logging/Logger.js';
+import { Logger } from '../../logging/Logger.js';
 
 class AudioBus {
   #subscribers = new Map();

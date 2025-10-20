@@ -262,7 +262,7 @@ input[type="file"] {
 <script src="./src/utils/pitch-smoothing.js"></script>
 
 <div class="wrap">
-  <div class="h1">🎵 Test Audio Core — Enregistrement + Détection Pitch (CORRIGÉE)</div>
+  <div class="h1">🎵 Test Audio Core — Enregistrement + Détection Pitch (LISSÉE)</div>
 
   <div class="bar">
     <button id="btnMic" class="btn">🎤 Activer micro</button>
@@ -678,4 +678,346 @@ function stopRecording() {
   }
 }
 
+/* ==================== MONITOR LIVE (SINUSOÏDE EN TEMPS RÉEL) ==================== */
+function startMonitor() {
+  try {
+    if (!detector || !analyser) return;
+    if (rafId) return;
+
+    const buf = new Float32Array(analyser.fftSize);
+
+    function tick() {
+      // Redessiner la base (grille + labels) SANS effacer la courbe
+      drawCanvasRec();
+
+      // Redessiner TOUS les points accumulés
+      if (recordedPitch.length > 0) {
+        ctxRec.strokeStyle = '#3b82f6';
+        ctxRec.lineWidth = 2.5;
+        ctxRec.lineJoin = 'round';
+        ctxRec.lineCap = 'round';
+        ctxRec.beginPath();
+
+        for (let i = 0; i < recordedPitch.length; i++) {
+          const p = recordedPitch[i];
+          if (i === 0) {
+            ctxRec.moveTo(p.x, p.y);
+          } else {
+            ctxRec.lineTo(p.x, p.y);
+          }
+        }
+
+        ctxRec.stroke();
+
+        // Redessiner les points
+        ctxRec.fillStyle = '#3b82f6';
+        for (const p of recordedPitch) {
+          ctxRec.beginPath();
+          ctxRec.arc(p.x, p.y, 2, 0, Math.PI * 2);
+          ctxRec.fill();
+        }
+      }
+
+      // Détecter le pitch et ajouter un nouveau point
+      try {
+        analyser.getFloatTimeDomainData(buf);
+        const hz = detector.detect(buf);
+
+        if (hz && hz > 0) {
+          recordDetectionRawCount++;
+
+          let smoothedHz = hz;
+          if (smoother) {
+            smoothedHz = smoother.smooth(hz);
+          }
+
+          if (smoothedHz && smoothedHz > 0) {
+            const cents = hzToCents(smoothedHz, 440);
+            const elapsed = audioCtx.currentTime - recStart;
+            const x = 60 + (canvasRec.width - 80) * Math.min(elapsed / 120, 1);
+            
+            // ✅ CORRECTION BUG: Limiter les cents à ±60 pour éviter coordonnées hors écran
+            const centsBounded = Math.max(-60, Math.min(60, cents));
+            const y = mapCentsToY(centsBounded, canvasRec.height);
+            
+            // ✅ VALIDATION: Vérifier que le point est dans les limites du canvas
+            if (y >= 0 && y <= canvasRec.height && x >= 0 && x <= canvasRec.width) {
+              recordedPitch.push({ t: elapsed, hz: smoothedHz, cents, x, y });
+              recordDetectionCount++;
+            } else {
+              // Debug: Log si point rejeté (utile pour diagnostiquer futures erreurs)
+              console.warn(`[PITCH] Point rejeté hors limites: x=${x.toFixed(0)}, y=${y.toFixed(0)}, cents=${cents.toFixed(1)}`);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Pitch detection error:', err);
+      }
+
+      debugRec.textContent = `Détections brutes: ${recordDetectionRawCount} | Points lissés: ${recordDetectionCount}`;
+
+      if (monitorOn || (mediaRecorder && mediaRecorder.state === 'recording')) {
+        rafId = requestAnimationFrame(tick);
+      }
+    }
+
+    tick();
+  } catch (err) {
+    log('ERROR', 'startMonitor: ' + err.message);
+  }
+}
+
+function stopMonitor() {
+  if (rafId) {
+    cancelAnimationFrame(rafId);
+    rafId = null;
+  }
+  drawCanvasRec();
+}
+
+/* ==================== EXPORTS ==================== */
+function downloadBlob(blob, name) {
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    log('INFO', `Téléchargé: ${name}`);
+  } catch (err) {
+    log('ERROR', 'downloadBlob: ' + err.message);
+  }
+}
+
+btnDownWebM.onclick = () => {
+  if (!lastBlob) return log('WARN', 'Aucun enregistrement');
+  downloadBlob(lastBlob, 'take.webm');
+};
+
+btnDownWAV.onclick = async () => {
+  try {
+    if (!lastBlob) return log('WARN', 'Aucun enregistrement');
+    if (!window.WAVExport) return log('ERROR', 'WAVExport indisponible');
+    const wav = await WAVExport.fromWebM(lastBlob);
+    if (!wav) return log('ERROR', 'Conversion WAV échouée');
+    downloadBlob(wav, 'take.wav');
+  } catch (err) {
+    log('ERROR', 'WAV download: ' + err.message);
+  }
+};
+
+btnDownMP3.onclick = async () => {
+  try {
+    if (!lastBlob) return log('WARN', 'Aucun enregistrement');
+    if (!window.WAVExport) return log('ERROR', 'WAVExport indisponible');
+    if (!window.MP3Export) return log('ERROR', 'MP3Export indisponible');
+
+    const wav = await WAVExport.fromWebM(lastBlob);
+    if (!wav) return log('ERROR', 'Conversion WAV échouée');
+    log('INFO', 'Encodage MP3 en cours...');
+    const mp3 = await MP3Export.fromWav(wav);
+    if (!mp3) return log('ERROR', 'Conversion MP3 échouée');
+    downloadBlob(mp3, 'take.mp3');
+  } catch (err) {
+    log('ERROR', 'MP3 download: ' + err.message);
+  }
+};
+
+btnClearRec.onclick = () => {
+  try {
+    chunks = [];
+    lastBlob = null;
+    recordedPitch = [];
+    recordDetectionCount = 0;
+    recordDetectionRawCount = 0;
+    updateTimer(0);
+    drawCanvasRec();
+    debugRec.textContent = 'Détections brutes: 0 | Points lissés: 0';
+    log('INFO', 'Enregistrement effacé');
+  } catch (err) {
+    log('ERROR', 'Clear rec: ' + err.message);
+  }
+};
+
+/* ==================== FILE UPLOADS ==================== */
+fileUploadRec.addEventListener('change', async (e) => {
+  try {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    await ensureAudio();
+    const buf = await file.arrayBuffer();
+    lastBlob = new Blob([buf], { type: file.type });
+    chunks = [new Blob([buf], { type: file.type })];
+    log('INFO', `Fichier chargé: ${file.name}`);
+  } catch (err) {
+    log('ERROR', 'Upload rec: ' + err.message);
+  }
+});
+
+fileUploadRef.addEventListener('change', async (e) => {
+  try {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    await ensureAudio();
+    const buf = await file.arrayBuffer();
+    const audio = await audioCtx.decodeAudioData(buf);
+    const ch = audio.getChannelData(0);
+    refData.duration = audio.duration;
+    refDetectionCount = 0;
+    refData.pitch = extractPitch(ch, audio.sampleRate);
+    drawReferenceData();
+    log('INFO', `Référence chargée: ${file.name} (${audio.duration.toFixed(1)}s, ${refData.pitch.length} points)`);
+  } catch (err) {
+    log('ERROR', 'Upload ref: ' + err.message);
+  }
+});
+
+btnClearRef.onclick = () => {
+  try {
+    refData = { pitch: [], duration: 0 };
+    refDetectionCount = 0;
+    drawCanvasRef();
+    debugRef.textContent = 'Détections brutes: 0 | Points lissés: 0';
+    log('INFO', 'Référence effacée');
+  } catch (err) {
+    log('ERROR', 'Clear ref: ' + err.message);
+  }
+};
+
+/* ==================== PITCH EXTRACTION ==================== */
+function extractPitch(samples, sr) {
+  try {
+    if (!detector) return [];
+
+    const result = [];
+    const win = 2048;
+    const hop = 512;
+    let detectionCount = 0;
+    let rawCount = 0;
+
+    if (smoother) {
+      smoother.reset();
+    }
+
+    for (let i = 0; i + win <= samples.length; i += hop) {
+      const slice = samples.subarray(i, i + win);
+      const hz = detector.detect(slice);
+      if (hz && hz > 0) {
+        rawCount++;
+
+        let smoothedHz = hz;
+        if (smoother) {
+          smoothedHz = smoother.smooth(hz);
+        }
+
+        if (smoothedHz && smoothedHz > 0) {
+          detectionCount++;
+          const t = i / sr;
+          const cents = hzToCents(smoothedHz, 440);
+          result.push({ t, hz: smoothedHz, cents });
+        }
+      }
+    }
+
+    refDetectionCount = detectionCount;
+    log('INFO', `Extraction référence: ${rawCount} brutes → ${detectionCount} lissées`);
+    return result;
+  } catch (err) {
+    log('ERROR', 'extractPitch: ' + err.message);
+    return [];
+  }
+}
+
+/* ==================== REFERENCE DRAWING ==================== */
+function drawReferenceData() {
+  try {
+    drawCanvasRef();
+
+    if (refData.pitch.length === 0) {
+      debugRef.textContent = 'Détections brutes: 0 | Points lissés: 0';
+      return;
+    }
+
+    const w = canvasRef.width;
+    const h = canvasRef.height;
+
+    // Tracer la courbe
+    ctxRef.strokeStyle = '#a78bfa';
+    ctxRef.lineWidth = 2.5;
+    ctxRef.lineJoin = 'round';
+    ctxRef.lineCap = 'round';
+    ctxRef.beginPath();
+
+    let first = true;
+    for (const p of refData.pitch) {
+      const x = 60 + (w - 80) * (p.t / Math.max(refData.duration, 1));
+      const y = mapCentsToY(p.cents, h);
+
+      if (first) {
+        ctxRef.moveTo(x, y);
+        first = false;
+      } else {
+        ctxRef.lineTo(x, y);
+      }
+    }
+
+    ctxRef.stroke();
+
+    // Points
+    ctxRef.fillStyle = '#a78bfa';
+    for (const p of refData.pitch) {
+      const x = 60 + (w - 80) * (p.t / Math.max(refData.duration, 1));
+      const y = mapCentsToY(p.cents, h);
+      ctxRef.beginPath();
+      ctxRef.arc(x, y, 2, 0, Math.PI * 2);
+      ctxRef.fill();
+    }
+
+    debugRef.textContent = `Détections brutes: ? | Points lissés: ${refData.pitch.length}`;
+
+    if (refData.pitch.length > 0) {
+      const devs = refData.pitch.map(p => Math.abs(p.cents));
+      const avg = devs.reduce((a, b) => a + b, 0) / devs.length;
+      const max = Math.max(...devs);
+      const inTune = refData.pitch.filter(p => Math.abs(p.cents) < 25).length / refData.pitch.length * 100;
+
+      mAvg.textContent = avg.toFixed(1) + 'c';
+      mMax.textContent = max.toFixed(1) + 'c';
+      mInTune.textContent = inTune.toFixed(1) + '%';
+    }
+  } catch (err) {
+    log('ERROR', 'drawReferenceData: ' + err.message);
+  }
+}
+
+/* ==================== EVENTS ==================== */
+btnMic.onclick = () => activateMic();
+btnRecStart.onclick = () => startRecording();
+btnRecStop.onclick = () => stopRecording();
+
+btnMonOff.onclick = () => {
+  monitorOn = false;
+  btnMonOff.classList.add('active');
+  btnMonOn.classList.remove('active');
+  stopMonitor();
+  log('INFO', 'Moniteur OFF');
+};
+
+btnMonOn.onclick = () => {
+  monitorOn = true;
+  btnMonOn.classList.add('active');
+  btnMonOff.classList.remove('active');
+  if (audioCtx) startMonitor();
+  log('INFO', 'Moniteur ON');
+};
+
+log('INFO', 'Interface prête - Sinusoïdes en temps réel + Abscisses activées');
 </script>
+
+</body>
+</html>

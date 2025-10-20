@@ -508,7 +508,10 @@ function drawCanvasRef() {
 }
 
 function mapCentsToY(cents, height) {
-  const centsPerPixel = 120 / (height - 80);
+  // ✅ CORRECTION V2: Amplifier la sensibilité pour voir graves/aigus
+  // Avant: 120 cents = hauteur entière (trop plate)
+  // Après: 60 cents = hauteur entière (2x plus sensible)
+  const centsPerPixel = 60 / (height - 80);
   const midY = height / 2;
   return midY - (cents / centsPerPixel);
 }
@@ -592,10 +595,10 @@ function initSmoother() {
     }
 
     smoother = new PitchSmoother({
-      medianWindowSize: 5,
-      smoothingFactor: 0.7,
-      maxPitchJump: 100,
-      minConfidence: 0.3
+      medianWindowSize: 3,        // ✅ 5→3: Moins de filtrage médian
+      smoothingFactor: 0.85,      // ✅ 0.7→0.85: Plus réactif aux changements
+      maxPitchJump: 150,          // ✅ 100→150: Moins restrictif pour les sauts musicaux
+      minConfidence: 0.2          // ✅ 0.3→0.2: Accepte plus de détections
     });
     log('INFO', 'PitchSmoother initialisé');
     return true;
@@ -736,17 +739,16 @@ function startMonitor() {
             const elapsed = audioCtx.currentTime - recStart;
             const x = 60 + (canvasRec.width - 80) * Math.min(elapsed / 120, 1);
             
-            // ✅ CORRECTION BUG: Limiter les cents à ±60 pour éviter coordonnées hors écran
-            const centsBounded = Math.max(-60, Math.min(60, cents));
+            // ✅ CORRECTION V2: Élargir la plage à ±100 pour mieux capturer graves/aigus
+            const centsBounded = Math.max(-100, Math.min(100, cents));
             const y = mapCentsToY(centsBounded, canvasRec.height);
             
-            // ✅ VALIDATION: Vérifier que le point est dans les limites du canvas
+            // ✅ VALIDATION: Vérifier limites canvas
             if (y >= 0 && y <= canvasRec.height && x >= 0 && x <= canvasRec.width) {
               recordedPitch.push({ t: elapsed, hz: smoothedHz, cents, x, y });
               recordDetectionCount++;
             } else {
-              // Debug: Log si point rejeté (utile pour diagnostiquer futures erreurs)
-              console.warn(`[PITCH] Point rejeté hors limites: x=${x.toFixed(0)}, y=${y.toFixed(0)}, cents=${cents.toFixed(1)}`);
+              console.warn(`[PITCH] Point rejeté: x=${x.toFixed(0)}, y=${y.toFixed(0)}, cents=${cents.toFixed(1)}`);
             }
           }
         }

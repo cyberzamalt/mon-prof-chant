@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8" />
-<title>Test Audio Core — Pitch Detection + Recording</title>
+<title>Test Audio Core — DEBUG VERSION (Logs Précis)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
 :root {
@@ -17,6 +17,7 @@
   --blue: #3b82f6;
   --green: #22c55e;
   --orange: #f59e0b;
+  --debug: #ff00ff;
 }
 
 * { box-sizing: border-box; }
@@ -24,7 +25,7 @@ html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.45 system-ui, Segoe UI, Roboto, Arial;
+  font: 13px/1.45 monospace;
   padding: 0;
 }
 
@@ -36,13 +37,14 @@ body {
 
 .h1 {
   font-weight: 800;
-  font-size: 20px;
+  font-size: 18px;
   margin: 0 0 16px 0;
+  color: var(--debug);
 }
 
 .h2 {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
   margin: 0 0 8px 0;
 }
 
@@ -65,8 +67,9 @@ body {
   padding: 8px 12px;
   cursor: pointer;
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12px;
   transition: all 0.2s;
+  font-family: monospace;
 }
 
 .btn:hover:not([disabled]) {
@@ -89,29 +92,6 @@ body {
   background: #2a0f14;
   border-color: #4a171f;
   color: #fecaca;
-}
-
-.seg {
-  display: inline-flex;
-  border: 1px solid #22304f;
-  background: var(--card);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.seg button {
-  padding: 8px 12px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.seg button.active {
-  background: #16213a;
-  color: #22c55e;
 }
 
 .timer {
@@ -146,7 +126,7 @@ body {
 }
 
 .canvasWrap {
-  border: 1px solid #1f2a44;
+  border: 2px solid var(--debug);
   border-radius: 8px;
   padding: 4px;
   background: #0b1324;
@@ -161,25 +141,19 @@ canvas {
   background: #0b1324;
 }
 
-.controls {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-}
-
 .log {
   background: #0b1020;
   border: 1px solid #1f2a44;
   border-radius: 8px;
   padding: 12px;
   color: #dbeafe;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  max-height: 250px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  max-height: 300px;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
+  line-height: 1.3;
 }
 
 .badge {
@@ -190,25 +164,25 @@ canvas {
   background: #0b1220;
   padding: 4px 8px;
   border-radius: 6px;
-  font-size: 12px;
-}
-
-.badge.ok {
-  color: #bbf7d0;
-  border-color: #206a44;
-  background: #052216;
-}
-
-.badge.warn {
-  color: #fde68a;
-  border-color: #6b4d11;
-  background: #261a06;
+  font-size: 11px;
+  font-family: monospace;
 }
 
 .hint {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   margin: 6px 0 8px 0;
+}
+
+.debugInfo {
+  background: #0b1020;
+  border: 1px solid #22304f;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #cbd5e1;
+  margin-top: 8px;
+  font-family: monospace;
 }
 
 .right {
@@ -221,7 +195,7 @@ input[type="file"] {
   border-radius: 8px;
   background: #0f172a;
   color: var(--text);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .metrics {
@@ -229,7 +203,7 @@ input[type="file"] {
   gap: 12px;
   flex-wrap: wrap;
   margin-top: 8px;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .metric {
@@ -237,16 +211,38 @@ input[type="file"] {
   border: 1px solid #22304f;
   border-radius: 6px;
   padding: 6px 10px;
+  font-family: monospace;
 }
 
-.debugInfo {
-  background: #0b1020;
-  border: 1px solid #22304f;
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 11px;
-  color: #cbd5e1;
+.controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-top: 8px;
+}
+
+.seg {
+  display: inline-flex;
+  border: 1px solid #22304f;
+  background: var(--card);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.seg button {
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.seg button.active {
+  background: #16213a;
+  color: #22c55e;
 }
 </style>
 </head>
@@ -255,14 +251,14 @@ input[type="file"] {
 <!-- TONE.JS CDN -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 
-<!-- YIN DETECTOR (détection brute) -->
+<!-- YIN DETECTOR -->
 <script src="./src/vendor/yin-detector.js"></script>
 
-<!-- PITCH SMOOTHER (lissage) -->
+<!-- PITCH SMOOTHER -->
 <script src="./src/utils/pitch-smoothing.js"></script>
 
 <div class="wrap">
-  <div class="h1">🎵 Test Audio Core — Enregistrement + Détection Pitch (LISSÉE)</div>
+  <div class="h1">🔧 DEBUG: Test Audio Core — Logs Précis Rendu Courbe</div>
 
   <div class="bar">
     <button id="btnMic" class="btn">🎤 Activer micro</button>
@@ -274,51 +270,29 @@ input[type="file"] {
 
     <div class="timer" id="timerRec">00:00</div>
 
-    <div class="seg">
-      <button id="btnMonOff" class="btn active">Moniteur OFF</button>
-      <button id="btnMonOn" class="btn">Moniteur ON</button>
-    </div>
-
-    <span class="right badge warn" id="pitchyStatus">Détecteur: chargement...</span>
+    <span class="right badge" id="pitchyStatus">🔧 DEBUG MODE</span>
   </div>
 
   <div class="cols">
     <div class="panel">
-      <p class="h2">🎙️ Ta prise (micro)</p>
-      <div class="hint">Courbe bleue = ton pitch lissé. Ligne verte = 0 cent (440 Hz).</div>
+      <p class="h2">📊 CANVAS: Ta Prise (Debug)</p>
+      <div class="hint">🎤 Courbe bleue = ton pitch lissé | 🟢 Ligne verte = 0 cent (440 Hz)</div>
       <div class="canvasWrap">
         <canvas id="canvasRec" width="600" height="320"></canvas>
       </div>
-      <div class="debugInfo" id="debugRec">Détections brutes: 0 | Points lissés: 0</div>
+      <div class="debugInfo" id="debugRec">Brutes: 0 | Lissés: 0 | Pts canvas: 0</div>
       <div class="controls">
-        <button id="btnDownWebM" class="btn">⬇️ WebM</button>
-        <button id="btnDownWAV" class="btn">🎧 WAV</button>
-        <button id="btnDownMP3" class="btn">🎵 MP3</button>
         <button id="btnClearRec" class="btn">🗑️ Effacer</button>
-        <input type="file" id="fileUploadRec" accept="audio/*" class="btn" style="border:1px solid #22304f;padding:8px 12px;cursor:pointer" />
       </div>
     </div>
 
     <div class="panel">
-      <p class="h2">🎼 Référence (comparaison)</p>
-      <div class="hint">Charge un MP3/WAV local pour comparer ta courbe.</div>
-      <div class="canvasWrap">
-        <canvas id="canvasRef" width="600" height="320"></canvas>
-      </div>
-      <div class="debugInfo" id="debugRef">Détections brutes: 0 | Points lissés: 0</div>
-      <div class="controls">
-        <input type="file" id="fileUploadRef" accept="audio/*" class="btn" style="border:1px solid #22304f;padding:8px 12px;cursor:pointer" />
-        <button id="btnClearRef" class="btn">🗑️ Effacer</button>
-      </div>
-      <div class="metrics" id="metricsRef">
-        <div class="metric">Écart moy: <b id="mAvg">—</b></div>
-        <div class="metric">Écart max: <b id="mMax">—</b></div>
-        <div class="metric">% juste: <b id="mInTune">—</b></div>
-      </div>
+      <p class="h2">📋 LOGS DE RENDU</p>
+      <div class="log" id="debugLog">Logs DEBUG activés...</div>
     </div>
   </div>
 
-  <div class="h1">📋 Logs</div>
+  <div class="h1">📋 Logs Principaux</div>
   <div id="logBox" class="log">Démarrage...</div>
 </div>
 
@@ -327,8 +301,10 @@ input[type="file"] {
 <script src="./src/utils/mp3-export.js"></script>
 
 <script>
-/* ==================== LOGGER ==================== */
+/* ==================== LOGGER PRINCIPAL ==================== */
 const logBox = document.getElementById('logBox');
+const debugLog = document.getElementById('debugLog');
+
 const log = (level, msg) => {
   const now = new Date();
   const h = String(now.getHours()).padStart(2, '0');
@@ -337,6 +313,11 @@ const log = (level, msg) => {
   const line = `[${h}:${m}:${s}] [${level}] ${msg}`;
   logBox.textContent += line + '\n';
   logBox.scrollTop = logBox.scrollHeight;
+};
+
+const debugLog_ = (msg) => {
+  debugLog.textContent += msg + '\n';
+  debugLog.scrollTop = debugLog.scrollHeight;
 };
 
 /* ==================== STATE ==================== */
@@ -354,45 +335,36 @@ let recordDetectionRawCount = 0;
 let recStart = 0;
 let timerInterval = null;
 let rafId = null;
-let monitorOn = false;
 
-let refData = { pitch: [], duration: 0 };
-let refDetectionCount = 0;
+let drawCallCount = 0;
+let tickCallCount = 0;
+let pointsAddedTotal = 0;
 
 const canvasRec = document.getElementById('canvasRec');
 const ctxRec = canvasRec.getContext('2d');
-const canvasRef = document.getElementById('canvasRef');
-const ctxRef = canvasRef.getContext('2d');
 
 const btnMic = document.getElementById('btnMic');
 const btnRecStart = document.getElementById('btnRecStart');
 const btnRecStop = document.getElementById('btnRecStop');
 const timerRec = document.getElementById('timerRec');
-const btnMonOff = document.getElementById('btnMonOff');
-const btnMonOn = document.getElementById('btnMonOn');
-const pitchyStatus = document.getElementById('pitchyStatus');
 const debugRec = document.getElementById('debugRec');
-const debugRef = document.getElementById('debugRef');
-const mAvg = document.getElementById('mAvg');
-const mMax = document.getElementById('mMax');
-const mInTune = document.getElementById('mInTune');
-const fileUploadRec = document.getElementById('fileUploadRec');
-const fileUploadRef = document.getElementById('fileUploadRef');
-const btnDownWebM = document.getElementById('btnDownWebM');
-const btnDownWAV = document.getElementById('btnDownWAV');
-const btnDownMP3 = document.getElementById('btnDownMP3');
 const btnClearRec = document.getElementById('btnClearRec');
-const btnClearRef = document.getElementById('btnClearRef');
 
 /* ==================== CANVAS HELPERS ==================== */
 function drawCanvasRec() {
+  drawCallCount++;
+  debugLog_(`[DRAW #${drawCallCount}] drawCanvasRec() appelée`);
+
   try {
     const w = canvasRec.width;
     const h = canvasRec.height;
     
+    debugLog_(`  → Canvas: ${w}x${h}`);
+    
     // Fond
     ctxRec.fillStyle = '#0b1324';
     ctxRec.fillRect(0, 0, w, h);
+    debugLog_(`  → Fond rempli`);
 
     // Grille horizontale fine
     ctxRec.strokeStyle = '#1a2642';
@@ -404,6 +376,7 @@ function drawCanvasRec() {
       ctxRec.lineTo(w, y);
       ctxRec.stroke();
     }
+    debugLog_(`  → Grille tracée`);
 
     // Ligne de référence (0 cents) - verte en tirets
     ctxRec.strokeStyle = '#10b981';
@@ -414,8 +387,9 @@ function drawCanvasRec() {
     ctxRec.lineTo(w, h / 2);
     ctxRec.stroke();
     ctxRec.setLineDash([]);
+    debugLog_(`  → Ligne verte pointillée tracée (y=${h/2})`);
 
-    // Labels Y (cents)
+    // Labels Y
     ctxRec.fillStyle = '#9ca3af';
     ctxRec.font = '11px monospace';
     ctxRec.textAlign = 'right';
@@ -423,87 +397,28 @@ function drawCanvasRec() {
     ctxRec.textAlign = 'left';
     ctxRec.fillText('-60c', 65, 16);
 
-    // Grille verticale et labels de temps (abscisses)
+    // Grille verticale et labels temps
     ctxRec.strokeStyle = '#22304f';
     ctxRec.lineWidth = 0.5;
     ctxRec.fillStyle = '#9ca3af';
     ctxRec.font = '10px monospace';
     ctxRec.textAlign = 'center';
     
-    // Graduations toutes les 5 secondes
     for (let sec = 0; sec <= 120; sec += 5) {
       const x = 60 + (w - 80) * (sec / 120);
       if (x < w - 20) {
-        // Ligne verticale
         ctxRec.beginPath();
         ctxRec.moveTo(x, 0);
         ctxRec.lineTo(x, h);
         ctxRec.stroke();
-        
-        // Label temps en bas
         ctxRec.fillText(sec + 's', x, h - 4);
       }
     }
+    debugLog_(`  → Grille verticale + temps tracées`);
+
   } catch (err) {
-    console.error('drawCanvasRec error:', err);
-  }
-}
-
-function drawCanvasRef() {
-  try {
-    const w = canvasRef.width;
-    const h = canvasRef.height;
-    
-    ctxRef.fillStyle = '#0b1324';
-    ctxRef.fillRect(0, 0, w, h);
-
-    ctxRef.strokeStyle = '#1a2642';
-    ctxRef.lineWidth = 0.5;
-    for (let i = 0; i < 5; i++) {
-      const y = (h / 4) * i;
-      ctxRef.beginPath();
-      ctxRef.moveTo(0, y);
-      ctxRef.lineTo(w, y);
-      ctxRef.stroke();
-    }
-
-    ctxRef.strokeStyle = '#10b981';
-    ctxRef.lineWidth = 2;
-    ctxRef.setLineDash([4, 4]);
-    ctxRef.beginPath();
-    ctxRef.moveTo(0, h / 2);
-    ctxRef.lineTo(w, h / 2);
-    ctxRef.stroke();
-    ctxRef.setLineDash([]);
-
-    ctxRef.fillStyle = '#9ca3af';
-    ctxRef.font = '11px monospace';
-    ctxRef.textAlign = 'right';
-    ctxRef.fillText('+60c', 55, 16);
-    ctxRef.textAlign = 'left';
-    ctxRef.fillText('-60c', 65, 16);
-
-    // Abscisses pour référence
-    ctxRef.strokeStyle = '#22304f';
-    ctxRef.lineWidth = 0.5;
-    ctxRef.fillStyle = '#9ca3af';
-    ctxRef.font = '10px monospace';
-    ctxRef.textAlign = 'center';
-    
-    const maxDur = Math.max(refData.duration, 1);
-    for (let sec = 0; sec <= Math.ceil(maxDur); sec += Math.max(1, Math.floor(maxDur / 10))) {
-      const x = 60 + (w - 80) * (sec / maxDur);
-      if (x < w - 20) {
-        ctxRef.beginPath();
-        ctxRef.moveTo(x, 0);
-        ctxRef.lineTo(x, h);
-        ctxRef.stroke();
-        
-        ctxRef.fillText(sec + 's', x, h - 4);
-      }
-    }
-  } catch (err) {
-    console.error('drawCanvasRef error:', err);
+    debugLog_(`❌ ERREUR drawCanvasRec: ${err.message}`);
+    log('ERROR', 'drawCanvasRec: ' + err.message);
   }
 }
 
@@ -524,13 +439,16 @@ async function ensureAudio() {
     if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       log('INFO', 'AudioContext créé');
+      debugLog_(`✅ AudioContext: sampleRate=${audioCtx.sampleRate}`);
     }
     if (audioCtx.state === 'suspended') {
       await audioCtx.resume();
       log('INFO', 'AudioContext repris');
+      debugLog_(`✅ AudioContext resumé`);
     }
   } catch (err) {
     log('ERROR', 'AudioContext: ' + err.message);
+    debugLog_(`❌ Erreur AudioContext: ${err.message}`);
     throw err;
   }
 }
@@ -542,6 +460,7 @@ async function activateMic() {
     if (!micStream) {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       log('INFO', 'Microphone autorisé');
+      debugLog_(`✅ Microphone: ${micStream.getTracks().length} track(s)`);
     }
 
     if (!analyser) {
@@ -550,6 +469,7 @@ async function activateMic() {
       analyser.fftSize = 2048;
       src.connect(analyser);
       log('INFO', 'Analyser connecté');
+      debugLog_(`✅ Analyser: fftSize=${analyser.fftSize}, connected`);
     }
 
     btnMic.disabled = true;
@@ -560,6 +480,7 @@ async function activateMic() {
 
   } catch (err) {
     log('ERROR', 'Mic: ' + err.message);
+    debugLog_(`❌ Mic error: ${err.message}`);
   }
 }
 
@@ -572,13 +493,11 @@ function initDetector() {
 
     detector = new PitchyLite(audioCtx.sampleRate);
     log('INFO', 'Détecteur pitch (PitchyLite) initialisé');
-    pitchyStatus.textContent = 'Détecteur: OK';
-    pitchyStatus.className = 'badge ok';
+    debugLog_(`✅ PitchyLite: prêt`);
     return true;
   } catch (err) {
     log('ERROR', 'initDetector: ' + err.message);
-    pitchyStatus.textContent = 'Détecteur: ERREUR';
-    pitchyStatus.className = 'badge err';
+    debugLog_(`❌ initDetector: ${err.message}`);
     return false;
   }
 }
@@ -588,6 +507,7 @@ function initSmoother() {
   try {
     if (typeof PitchSmoother === 'undefined') {
       log('WARN', 'PitchSmoother non disponible');
+      debugLog_(`⚠️ PitchSmoother: non disponible`);
       return false;
     }
 
@@ -598,9 +518,11 @@ function initSmoother() {
       minConfidence: 0.3
     });
     log('INFO', 'PitchSmoother initialisé');
+    debugLog_(`✅ PitchSmoother: initialisé`);
     return true;
   } catch (err) {
     log('WARN', 'initSmoother: ' + err.message);
+    debugLog_(`⚠️ initSmoother: ${err.message}`);
     return false;
   }
 }
@@ -627,7 +549,13 @@ function startRecording() {
     recordedPitch = [];
     recordDetectionCount = 0;
     recordDetectionRawCount = 0;
+    pointsAddedTotal = 0;
+    drawCallCount = 0;
+    tickCallCount = 0;
     recStart = audioCtx.currentTime;
+
+    debugLog_(`========== DÉBUT ENREGISTREMENT ==========`);
+    debugLog_(`Heure: ${recStart.toFixed(3)}`);
 
     const options = {
       mimeType: 'audio/webm;codecs=opus',
@@ -644,6 +572,7 @@ function startRecording() {
       if (chunks.length > 0) {
         lastBlob = new Blob(chunks, { type: 'audio/webm' });
         log('INFO', 'Enregistrement terminé');
+        debugLog_(`✅ Enregistrement terminé: ${lastBlob.size} bytes`);
       }
     };
 
@@ -660,6 +589,7 @@ function startRecording() {
     startMonitor();
   } catch (err) {
     log('ERROR', 'startRecording: ' + err.message);
+    debugLog_(`❌ startRecording: ${err.message}`);
   }
 }
 
@@ -672,26 +602,48 @@ function stopRecording() {
       clearInterval(timerInterval);
       updateTimer(0);
       stopMonitor();
+      
+      debugLog_(`========== FIN ENREGISTREMENT ==========`);
+      debugLog_(`Total tick() calls: ${tickCallCount}`);
+      debugLog_(`Total draw() calls: ${drawCallCount}`);
+      debugLog_(`Points ajoutés: ${pointsAddedTotal}`);
+      debugLog_(`recordedPitch.length: ${recordedPitch.length}`);
     }
   } catch (err) {
     log('ERROR', 'stopRecording: ' + err.message);
+    debugLog_(`❌ stopRecording: ${err.message}`);
   }
 }
 
-/* ==================== MONITOR LIVE (SINUSOÏDE EN TEMPS RÉEL) ==================== */
+/* ==================== MONITOR LIVE ==================== */
 function startMonitor() {
   try {
-    if (!detector || !analyser) return;
-    if (rafId) return;
+    if (!detector || !analyser) {
+      debugLog_(`❌ startMonitor: detector ou analyser manquant`);
+      return;
+    }
+    if (rafId) {
+      debugLog_(`⚠️ startMonitor: déjà en cours`);
+      return;
+    }
 
     const buf = new Float32Array(analyser.fftSize);
 
     function tick() {
-      // Redessiner la base (grille + labels) SANS effacer la courbe
+      tickCallCount++;
+      
+      // Chaque 30 ticks, afficher dans debugLog
+      if (tickCallCount % 30 === 0) {
+        debugLog_(`[TICK #${tickCallCount}] recordedPitch.length=${recordedPitch.length}`);
+      }
+
+      // Redessiner la base
       drawCanvasRec();
 
-      // Redessiner TOUS les points accumulés
+      // REDESSINER LA COURBE - C'EST LÀ QUE ÇA DOIT MARCHER!
       if (recordedPitch.length > 0) {
+        debugLog_(`[DRAW-CURVE #${drawCallCount}] ${recordedPitch.length} points à tracer`);
+
         ctxRec.strokeStyle = '#3b82f6';
         ctxRec.lineWidth = 2.5;
         ctxRec.lineJoin = 'round';
@@ -700,6 +652,12 @@ function startMonitor() {
 
         for (let i = 0; i < recordedPitch.length; i++) {
           const p = recordedPitch[i];
+          
+          // Log les premiers et derniers points
+          if (i === 0 || i === recordedPitch.length - 1) {
+            debugLog_(`  → Point[${i}]: x=${p.x.toFixed(1)}, y=${p.y.toFixed(1)}, cents=${p.cents.toFixed(1)}`);
+          }
+
           if (i === 0) {
             ctxRec.moveTo(p.x, p.y);
           } else {
@@ -707,14 +665,21 @@ function startMonitor() {
           }
         }
 
+        debugLog_(`  → Appel ctxRec.stroke() avec couleur #3b82f6, width=2.5`);
         ctxRec.stroke();
 
-        // Redessiner les points
+        // Tracer les points
         ctxRec.fillStyle = '#3b82f6';
         for (const p of recordedPitch) {
           ctxRec.beginPath();
           ctxRec.arc(p.x, p.y, 2, 0, Math.PI * 2);
           ctxRec.fill();
+        }
+        
+        debugLog_(`  ✅ Courbe tracée (${recordedPitch.length} points + cercles)`);
+      } else {
+        if (tickCallCount % 30 === 0) {
+          debugLog_(`⚠️ recordedPitch vide, pas de courbe`);
         }
       }
 
@@ -731,30 +696,41 @@ function startMonitor() {
             smoothedHz = smoother.smooth(hz);
           }
 
-          if (smoothedHz && smoothedHz > 0) {
-            const cents = hzToCents(smoothedHz, 440);
+          // ✅ FIX: Utiliser smoothedHz OU hz brut si smoother retourne null
+          const finalHz = smoothedHz || hz;
+          
+          if (finalHz && finalHz > 0) {
+            const cents = hzToCents(finalHz, 440);
             const elapsed = audioCtx.currentTime - recStart;
             const x = 60 + (canvasRec.width - 80) * Math.min(elapsed / 120, 1);
             const y = mapCentsToY(cents, canvasRec.height);
 
-            recordedPitch.push({ t: elapsed, hz: smoothedHz, cents, x, y });
+            recordedPitch.push({ t: elapsed, hz: finalHz, cents, x, y });
             recordDetectionCount++;
+            pointsAddedTotal++;
+
+            // Log toutes les 10 détections
+            if (recordDetectionCount % 10 === 0) {
+              debugLog_(`  → Détection #${recordDetectionCount}: hz=${finalHz.toFixed(1)}, x=${x.toFixed(1)}, y=${y.toFixed(1)}`);
+            }
           }
         }
       } catch (err) {
-        console.error('Pitch detection error:', err);
+        debugLog_(`❌ ERREUR tick detection: ${err.message}`);
       }
 
-      debugRec.textContent = `Détections brutes: ${recordDetectionRawCount} | Points lissés: ${recordDetectionCount}`;
+      debugRec.textContent = `Brutes: ${recordDetectionRawCount} | Lissés: ${recordDetectionCount} | Pts canvas: ${recordedPitch.length}`;
 
-      if (monitorOn || (mediaRecorder && mediaRecorder.state === 'recording')) {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
         rafId = requestAnimationFrame(tick);
       }
     }
 
     tick();
+    debugLog_(`✅ startMonitor: requestAnimationFrame lancé`);
   } catch (err) {
     log('ERROR', 'startMonitor: ' + err.message);
+    debugLog_(`❌ startMonitor: ${err.message}`);
   }
 }
 
@@ -766,57 +742,10 @@ function stopMonitor() {
   drawCanvasRec();
 }
 
-/* ==================== EXPORTS ==================== */
-function downloadBlob(blob, name) {
-  try {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    log('INFO', `Téléchargé: ${name}`);
-  } catch (err) {
-    log('ERROR', 'downloadBlob: ' + err.message);
-  }
-}
-
-btnDownWebM.onclick = () => {
-  if (!lastBlob) return log('WARN', 'Aucun enregistrement');
-  downloadBlob(lastBlob, 'take.webm');
-};
-
-btnDownWAV.onclick = async () => {
-  try {
-    if (!lastBlob) return log('WARN', 'Aucun enregistrement');
-    if (!window.WAVExport) return log('ERROR', 'WAVExport indisponible');
-    const wav = await WAVExport.fromWebM(lastBlob);
-    if (!wav) return log('ERROR', 'Conversion WAV échouée');
-    downloadBlob(wav, 'take.wav');
-  } catch (err) {
-    log('ERROR', 'WAV download: ' + err.message);
-  }
-};
-
-btnDownMP3.onclick = async () => {
-  try {
-    if (!lastBlob) return log('WARN', 'Aucun enregistrement');
-    if (!window.WAVExport) return log('ERROR', 'WAVExport indisponible');
-    if (!window.MP3Export) return log('ERROR', 'MP3Export indisponible');
-
-    const wav = await WAVExport.fromWebM(lastBlob);
-    if (!wav) return log('ERROR', 'Conversion WAV échouée');
-    log('INFO', 'Encodage MP3 en cours...');
-    const mp3 = await MP3Export.fromWav(wav);
-    if (!mp3) return log('ERROR', 'Conversion MP3 échouée');
-    downloadBlob(mp3, 'take.mp3');
-  } catch (err) {
-    log('ERROR', 'MP3 download: ' + err.message);
-  }
-};
-
+/* ==================== EVENTS ==================== */
+btnMic.onclick = () => activateMic();
+btnRecStart.onclick = () => startRecording();
+btnRecStop.onclick = () => stopRecording();
 btnClearRec.onclick = () => {
   try {
     chunks = [];
@@ -824,190 +753,19 @@ btnClearRec.onclick = () => {
     recordedPitch = [];
     recordDetectionCount = 0;
     recordDetectionRawCount = 0;
+    pointsAddedTotal = 0;
     updateTimer(0);
     drawCanvasRec();
-    debugRec.textContent = 'Détections brutes: 0 | Points lissés: 0';
+    debugRec.textContent = 'Brutes: 0 | Lissés: 0 | Pts canvas: 0';
+    debugLog_(`🗑️ Canvas effacé`);
     log('INFO', 'Enregistrement effacé');
   } catch (err) {
     log('ERROR', 'Clear rec: ' + err.message);
   }
 };
 
-/* ==================== FILE UPLOADS ==================== */
-fileUploadRec.addEventListener('change', async (e) => {
-  try {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    await ensureAudio();
-    const buf = await file.arrayBuffer();
-    lastBlob = new Blob([buf], { type: file.type });
-    chunks = [new Blob([buf], { type: file.type })];
-    log('INFO', `Fichier chargé: ${file.name}`);
-  } catch (err) {
-    log('ERROR', 'Upload rec: ' + err.message);
-  }
-});
-
-fileUploadRef.addEventListener('change', async (e) => {
-  try {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    await ensureAudio();
-    const buf = await file.arrayBuffer();
-    const audio = await audioCtx.decodeAudioData(buf);
-    const ch = audio.getChannelData(0);
-    refData.duration = audio.duration;
-    refDetectionCount = 0;
-    refData.pitch = extractPitch(ch, audio.sampleRate);
-    drawReferenceData();
-    log('INFO', `Référence chargée: ${file.name} (${audio.duration.toFixed(1)}s, ${refData.pitch.length} points)`);
-  } catch (err) {
-    log('ERROR', 'Upload ref: ' + err.message);
-  }
-});
-
-btnClearRef.onclick = () => {
-  try {
-    refData = { pitch: [], duration: 0 };
-    refDetectionCount = 0;
-    drawCanvasRef();
-    debugRef.textContent = 'Détections brutes: 0 | Points lissés: 0';
-    log('INFO', 'Référence effacée');
-  } catch (err) {
-    log('ERROR', 'Clear ref: ' + err.message);
-  }
-};
-
-/* ==================== PITCH EXTRACTION ==================== */
-function extractPitch(samples, sr) {
-  try {
-    if (!detector) return [];
-
-    const result = [];
-    const win = 2048;
-    const hop = 512;
-    let detectionCount = 0;
-    let rawCount = 0;
-
-    if (smoother) {
-      smoother.reset();
-    }
-
-    for (let i = 0; i + win <= samples.length; i += hop) {
-      const slice = samples.subarray(i, i + win);
-      const hz = detector.detect(slice);
-      if (hz && hz > 0) {
-        rawCount++;
-
-        let smoothedHz = hz;
-        if (smoother) {
-          smoothedHz = smoother.smooth(hz);
-        }
-
-        if (smoothedHz && smoothedHz > 0) {
-          detectionCount++;
-          const t = i / sr;
-          const cents = hzToCents(smoothedHz, 440);
-          result.push({ t, hz: smoothedHz, cents });
-        }
-      }
-    }
-
-    refDetectionCount = detectionCount;
-    log('INFO', `Extraction référence: ${rawCount} brutes → ${detectionCount} lissées`);
-    return result;
-  } catch (err) {
-    log('ERROR', 'extractPitch: ' + err.message);
-    return [];
-  }
-}
-
-/* ==================== REFERENCE DRAWING ==================== */
-function drawReferenceData() {
-  try {
-    drawCanvasRef();
-
-    if (refData.pitch.length === 0) {
-      debugRef.textContent = 'Détections brutes: 0 | Points lissés: 0';
-      return;
-    }
-
-    const w = canvasRef.width;
-    const h = canvasRef.height;
-
-    // Tracer la courbe
-    ctxRef.strokeStyle = '#a78bfa';
-    ctxRef.lineWidth = 2.5;
-    ctxRef.lineJoin = 'round';
-    ctxRef.lineCap = 'round';
-    ctxRef.beginPath();
-
-    let first = true;
-    for (const p of refData.pitch) {
-      const x = 60 + (w - 80) * (p.t / Math.max(refData.duration, 1));
-      const y = mapCentsToY(p.cents, h);
-
-      if (first) {
-        ctxRef.moveTo(x, y);
-        first = false;
-      } else {
-        ctxRef.lineTo(x, y);
-      }
-    }
-
-    ctxRef.stroke();
-
-    // Points
-    ctxRef.fillStyle = '#a78bfa';
-    for (const p of refData.pitch) {
-      const x = 60 + (w - 80) * (p.t / Math.max(refData.duration, 1));
-      const y = mapCentsToY(p.cents, h);
-      ctxRef.beginPath();
-      ctxRef.arc(x, y, 2, 0, Math.PI * 2);
-      ctxRef.fill();
-    }
-
-    debugRef.textContent = `Détections brutes: ? | Points lissés: ${refData.pitch.length}`;
-
-    if (refData.pitch.length > 0) {
-      const devs = refData.pitch.map(p => Math.abs(p.cents));
-      const avg = devs.reduce((a, b) => a + b, 0) / devs.length;
-      const max = Math.max(...devs);
-      const inTune = refData.pitch.filter(p => Math.abs(p.cents) < 25).length / refData.pitch.length * 100;
-
-      mAvg.textContent = avg.toFixed(1) + 'c';
-      mMax.textContent = max.toFixed(1) + 'c';
-      mInTune.textContent = inTune.toFixed(1) + '%';
-    }
-  } catch (err) {
-    log('ERROR', 'drawReferenceData: ' + err.message);
-  }
-}
-
-/* ==================== EVENTS ==================== */
-btnMic.onclick = () => activateMic();
-btnRecStart.onclick = () => startRecording();
-btnRecStop.onclick = () => stopRecording();
-
-btnMonOff.onclick = () => {
-  monitorOn = false;
-  btnMonOff.classList.add('active');
-  btnMonOn.classList.remove('active');
-  stopMonitor();
-  log('INFO', 'Moniteur OFF');
-};
-
-btnMonOn.onclick = () => {
-  monitorOn = true;
-  btnMonOn.classList.add('active');
-  btnMonOff.classList.remove('active');
-  if (audioCtx) startMonitor();
-  log('INFO', 'Moniteur ON');
-};
-
-log('INFO', 'Interface prête - Sinusoïdes en temps réel + Abscisses activées');
+log('INFO', '✅ Interface DEBUG prête');
+debugLog_(`✅ DEBUG MODE ACTIF - Logs précis du rendu`);
 </script>
 
 </body>

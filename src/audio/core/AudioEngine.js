@@ -164,6 +164,46 @@ class AudioEngine {
   }
 
   /**
+   * Alias pour getContext() - compatibilité PitchDetector
+   */
+  ctx() {
+    try {
+      return this.getContext();
+    } catch (err) {
+      Logger.error('AudioEngine', 'ctx failed', err);
+      return null;
+    }
+  }
+
+  /**
+   * Obtenir le temps courant en secondes - compatibilité PitchDetector
+   */
+  currentTime() {
+    try {
+      if (!this.#audioContext) {
+        Logger.warn('AudioEngine', 'currentTime: AudioContext not initialized');
+        return 0;
+      }
+      return this.#audioContext.currentTime;
+    } catch (err) {
+      Logger.error('AudioEngine', 'currentTime failed', err);
+      return 0;
+    }
+  }
+
+  /**
+   * Alias pour getSampleRate() - compatibilité PitchDetector
+   */
+  sampleRate() {
+    try {
+      return this.getSampleRate();
+    } catch (err) {
+      Logger.error('AudioEngine', 'sampleRate failed', err);
+      return this.#config.sampleRate;
+    }
+  }
+
+  /**
    * Obtenir état
    */
   getState() {

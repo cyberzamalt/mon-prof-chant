@@ -1,11 +1,15 @@
 /**
  * pitchy-lite.js
- * TYPE: Library - Pitch Detection via Tone.js
+ * TYPE: Library - Pitch Detection via Autocorrelation
  * 
  * Responsabilités:
- * - Wrapper autour de Tone.js Frequency detector
- * - Détection pitch en temps réel
+ * - Détection pitch en temps réel via autocorrélation
  * - Interface simple
+ * 
+ * CORRECTIONS APPLIQUÉES:
+ * - Copie du buffer avant normalisation (évite mutation)
+ * - Autocorrélation correcte (sans Math.abs)
+ * - Recherche du premier pic maximum (au lieu de minimum)
  */
 
 class PitchyLite {
@@ -42,7 +46,7 @@ class PitchyLite {
 
   /**
    * Détecter la pitch d'un buffer audio
-   * Utilise autocorrelation simplifié
+   * Utilise autocorrelation corrigé
    */
   detect(audioBuffer) {
     try {
@@ -86,25 +90,31 @@ class PitchyLite {
   }
 
   /**
-   * Autocorrelation algorithm (simplifié mais robuste)
+   * Autocorrelation algorithm (CORRIGÉ)
    */
   autocorrelate(buffer, sampleRate) {
     try {
       const SIZE = Math.min(buffer.length, 4096);
       let maxSamples = Math.floor(SIZE / 2);
 
-      // Normaliser
+      // FIX #1: COPIER le buffer avant normalisation (évite mutation)
+      const bufferCopy = new Float32Array(SIZE);
+      for (let i = 0; i < SIZE; i++) {
+        bufferCopy[i] = buffer[i];
+      }
+
+      // Normaliser LA COPIE (pas l'original)
       let max = 0;
       for (let i = 0; i < SIZE; i++) {
-        if (Math.abs(buffer[i]) > max) {
-          max = Math.abs(buffer[i]);
+        if (Math.abs(bufferCopy[i]) > max) {
+          max = Math.abs(bufferCopy[i]);
         }
       }
 
       if (max === 0) return null;
 
       for (let i = 0; i < SIZE; i++) {
-        buffer[i] = buffer[i] / max;
+        bufferCopy[i] = bufferCopy[i] / max;
       }
 
       // Calculer autocorrelation
@@ -112,7 +122,8 @@ class PitchyLite {
       for (let lag = 0; lag < maxSamples; lag++) {
         let sum = 0;
         for (let index = 0; index < SIZE - lag; index++) {
-          sum += Math.abs(buffer[index] * buffer[index + lag]);
+          // FIX #2: ENLEVER Math.abs() pour autocorrélation correcte
+          sum += bufferCopy[index] * bufferCopy[index + lag];
         }
         result[lag] = sum;
       }
@@ -124,20 +135,21 @@ class PitchyLite {
         d++;
       }
 
-      // Chercher le minima
-      let minValue = result[d];
-      let minIndex = d;
+      // FIX #3: Chercher le MAXIMUM (pic) au lieu du minimum
+      let maxValue = result[d];
+      let maxIndex = d;
       for (let i = d + 1; i < Math.min(maxSamples, d + maxSamples / 2); i++) {
-        if (result[i] < minValue) {
-          minValue = result[i];
-          minIndex = i;
+        if (result[i] > maxValue) {
+          maxValue = result[i];
+          maxIndex = i;
         }
       }
 
-      if (minIndex > 0) {
+      if (maxIndex > 0 && maxIndex < result.length - 1) {
         // Interpolation parabolique
-        const shift = (result[minIndex + 1] - result[minIndex - 1]) / (2 * (2 * result[minIndex] - result[minIndex - 1] - result[minIndex + 1]));
-        return sampleRate / (minIndex + shift);
+        const shift = (result[maxIndex + 1] - result[maxIndex - 1]) / 
+                      (2 * (2 * result[maxIndex] - result[maxIndex - 1] - result[maxIndex + 1]));
+        return sampleRate / (maxIndex + shift);
       }
 
       return null;

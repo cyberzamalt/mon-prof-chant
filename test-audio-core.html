@@ -726,7 +726,8 @@ function startMonitor() {
         analyser.getFloatTimeDomainData(buf);
         const hz = detector.detect(buf);
 
-        if (hz && hz > 0) {
+        // ✅ GARDE-FOU: Rejeter fréquences hors plage vocale (70-1000 Hz)
+        if (hz && hz >= 70 && hz <= 1000) {
           recordDetectionRawCount++;
 
           let smoothedHz = hz;
@@ -909,7 +910,8 @@ function extractPitch(samples, sr) {
     for (let i = 0; i + win <= samples.length; i += hop) {
       const slice = samples.subarray(i, i + win);
       const hz = detector.detect(slice);
-      if (hz && hz > 0) {
+      // ✅ GARDE-FOU: Rejeter fréquences hors plage vocale (70-1000 Hz)
+      if (hz && hz >= 70 && hz <= 1000) {
         rawCount++;
 
         let smoothedHz = hz;

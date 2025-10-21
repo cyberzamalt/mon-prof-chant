@@ -322,7 +322,6 @@ input[type="file"] {
   <div id="logBox" class="log">Démarrage...</div>
 </div>
 
-<script src="./src/vendor/pitchy-lite.js"></script>
 <script src="./src/utils/wav-export.js"></script>
 <script src="./src/utils/mp3-export.js"></script>
 
@@ -569,12 +568,13 @@ async function activateMic() {
 /* ==================== PITCH DETECTION ==================== */
 function initDetector() {
   try {
-    if (typeof PitchyLite === 'undefined') {
-      throw new Error('PitchyLite non disponible');
+    if (typeof YinDetector === 'undefined') {
+      throw new Error('YinDetector non disponible');
     }
 
-    detector = new PitchyLite(audioCtx.sampleRate);
-    log('INFO', 'Détecteur pitch (PitchyLite) initialisé');
+    detector = new YinDetector(audioCtx.sampleRate, 2048);
+    detector.threshold = 0.10; // Seuil YIN (0.1 = standard, plus bas = plus sensible)
+    log('INFO', 'Détecteur pitch (YinDetector) initialisé - Seuil: 0.10');
     pitchyStatus.textContent = 'Détecteur: OK';
     pitchyStatus.className = 'badge ok';
     return true;

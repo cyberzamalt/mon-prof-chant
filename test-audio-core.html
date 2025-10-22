@@ -73,7 +73,7 @@ input[type="file"]{padding:8px 12px;border:1px solid #22304f;border-radius:8px;b
   <div class="cols">
     <div class="panel">
       <p class="h2">🎙️ Ta prise (micro)</p>
-      <div class="hint">Courbe bleue = pitch lissé. Ligne verte = 0 cent (440 Hz). Fenêtre visible : 30 s.</div>
+      <div class="hint">Courbe bleue lisse = pitch détecté (YIN 0.05). Échelle ±200 cents. Labels vocaux à gauche. Fenêtre visible : 30 s.</div>
       <div class="canvasWrap">
         <canvas id="canvasRec" width="600" height="320"></canvas>
       </div>
@@ -133,8 +133,8 @@ let refData={pitch:[],duration:0}; let refDetectionCount=0;
 
 /* Réglages “chirurgien” */
 const VISIBLE_WINDOW = 30;              // secondes visibles (live)
-const Y_RANGE_CENTS = 100;              // ±100 cents
-const MIN_HZ = 70, MAX_HZ = 1000;       // garde-fou voix
+const Y_RANGE_CENTS = 200;              // ±200 cents (échelle plus souple)
+const MIN_HZ = 60, MAX_HZ = 1200;       // garde-fou voix élargi
 const REFRESH_BASE_EVERY_MS = 800;      // cache de la base
 
 /* DOM */
@@ -180,13 +180,37 @@ function drawBaseRec(t0){
   // lignes horizontales (graves/aigus)
   ctx.strokeStyle='#1a2642'; ctx.lineWidth=0.5;
   for(let i=0;i<5;i++){ const y=(h/4)*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+  
   // 0 cent (vert pointillé)
   ctx.strokeStyle='#10b981'; ctx.setLineDash([4,4]); ctx.lineWidth=2;
   ctx.beginPath(); ctx.moveTo(0,h/2); ctx.lineTo(w,h/2); ctx.stroke(); ctx.setLineDash([]);
-  // labels Y
+  
+  // ===== LABELS VERTICAUX (HAUTEUR VOCALE) =====
+  ctx.fillStyle='#9ca3af'; ctx.font='9px monospace'; ctx.textAlign='left';
+  const vocalLabels = [
+    { cents: 200, label: '🔝 Très très aigu', y: mapCentsToY(200, h) },
+    { cents: 150, label: 'Très aigu', y: mapCentsToY(150, h) },
+    { cents: 100, label: 'Aigu', y: mapCentsToY(100, h) },
+    { cents: 50, label: 'Moyen aigu', y: mapCentsToY(50, h) },
+    { cents: 0, label: '🎯 Milieu (juste)', y: mapCentsToY(0, h) },
+    { cents: -50, label: 'Moyen grave', y: mapCentsToY(-50, h) },
+    { cents: -100, label: 'Grave', y: mapCentsToY(-100, h) },
+    { cents: -150, label: 'Très grave', y: mapCentsToY(-150, h) },
+    { cents: -200, label: '🔻 Très très grave', y: mapCentsToY(-200, h) }
+  ];
+  
+  for(const v of vocalLabels) {
+    ctx.fillText(v.label, 2, v.y + 3);
+    // Tick horizontal discret
+    ctx.strokeStyle='#2a3a54'; ctx.lineWidth=0.5;
+    ctx.beginPath(); ctx.moveTo(0, v.y); ctx.lineTo(58, v.y); ctx.stroke();
+  }
+  
+  // labels Y (cents numériques à droite)
   ctx.fillStyle='#9ca3af'; ctx.font='11px monospace'; ctx.textAlign='right';
   ctx.fillText(`+${Y_RANGE_CENTS}c`, 55, 16);
   ctx.textAlign='left'; ctx.fillText(`-${Y_RANGE_CENTS}c`, 65, 16);
+  
   // abscisses : ticks 1s / labels 5s
   ctx.strokeStyle='#22304f'; ctx.lineWidth=0.5; ctx.fillStyle='#9ca3af'; ctx.font='10px monospace'; ctx.textAlign='center';
   const left=60, right=20, drawW = w - left - right;
@@ -213,6 +237,28 @@ function drawBaseRef(duration){
   for(let i=0;i<5;i++){ const y=(h/4)*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();}
   ctx.strokeStyle='#10b981'; ctx.setLineDash([4,4]); ctx.lineWidth=2;
   ctx.beginPath(); ctx.moveTo(0,h/2); ctx.lineTo(w,h/2); ctx.stroke(); ctx.setLineDash([]);
+  
+  // ===== LABELS VERTICAUX (HAUTEUR VOCALE) =====
+  ctx.fillStyle='#9ca3af'; ctx.font='9px monospace'; ctx.textAlign='left';
+  const vocalLabels = [
+    { cents: 200, label: '🔝 Très très aigu', y: mapCentsToY(200, h) },
+    { cents: 150, label: 'Très aigu', y: mapCentsToY(150, h) },
+    { cents: 100, label: 'Aigu', y: mapCentsToY(100, h) },
+    { cents: 50, label: 'Moyen aigu', y: mapCentsToY(50, h) },
+    { cents: 0, label: '🎯 Milieu (juste)', y: mapCentsToY(0, h) },
+    { cents: -50, label: 'Moyen grave', y: mapCentsToY(-50, h) },
+    { cents: -100, label: 'Grave', y: mapCentsToY(-100, h) },
+    { cents: -150, label: 'Très grave', y: mapCentsToY(-150, h) },
+    { cents: -200, label: '🔻 Très très grave', y: mapCentsToY(-200, h) }
+  ];
+  
+  for(const v of vocalLabels) {
+    ctx.fillText(v.label, 2, v.y + 3);
+    // Tick horizontal discret
+    ctx.strokeStyle='#2a3a54'; ctx.lineWidth=0.5;
+    ctx.beginPath(); ctx.moveTo(0, v.y); ctx.lineTo(58, v.y); ctx.stroke();
+  }
+  
   ctx.fillStyle='#9ca3af'; ctx.font='11px monospace'; ctx.textAlign='right';
   ctx.fillText(`+${Y_RANGE_CENTS}c`,55,16); ctx.textAlign='left'; ctx.fillText(`-${Y_RANGE_CENTS}c`,65,16);
   ctx.strokeStyle='#22304f'; ctx.fillStyle='#9ca3af'; ctx.font='10px monospace'; ctx.textAlign='center';
@@ -222,6 +268,37 @@ function drawBaseRef(duration){
     const x = left + (s/duration)*drawW;
     if(x<=w-right){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); ctx.fillText(fmtTime(s), x, h-4); }
   }
+}
+
+/* ==================== INTERPOLATION CATMULL-ROM ==================== */
+/* Dessine une courbe lisse qui passe par tous les points */
+function drawSmoothCurve(ctx, points, tension = 0.5) {
+  if (points.length < 2) return;
+  
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  
+  if (points.length === 2) {
+    ctx.lineTo(points[1].x, points[1].y);
+  } else {
+    // Pour chaque segment, utiliser les 4 points (p0, p1, p2, p3)
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[Math.max(0, i - 1)];
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const p3 = points[Math.min(points.length - 1, i + 2)];
+      
+      // Points de contrôle pour la courbe de Bézier cubique
+      const cp1x = p1.x + (p2.x - p0.x) / 6 * tension;
+      const cp1y = p1.y + (p2.y - p0.y) / 6 * tension;
+      const cp2x = p2.x - (p3.x - p1.x) / 6 * tension;
+      const cp2y = p2.y - (p3.y - p1.y) / 6 * tension;
+      
+      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+    }
+  }
+  
+  ctx.stroke();
 }
 
 /* Trace courbe REC (en utilisant la fenêtre glissante) */
@@ -239,24 +316,25 @@ function drawRec(tNow){
   const pts = recordedPitch.filter(p => p.t >= t0);
   if(pts.length===0) return;
 
-  // polyline
-  ctxRec.strokeStyle = getComputedStyle(document.body).getPropertyValue('--blue').trim() || '#3b82f6';
-  ctxRec.lineWidth = 2.5; ctxRec.lineJoin='round'; ctxRec.lineCap='round';
-  ctxRec.beginPath();
-  for(let i=0;i<pts.length;i++){
-    const p=pts[i];
-    const x = left + ((p.t - t0)/VISIBLE_WINDOW) * drawW;
-    const y = mapCentsToY(p.cents, h);
-    if(i===0) ctxRec.moveTo(x,y); else ctxRec.lineTo(x,y);
-  }
-  ctxRec.stroke();
+  // Préparer les points avec coordonnées canvas
+  const curvePoints = pts.map(p => ({
+    x: left + ((p.t - t0)/VISIBLE_WINDOW) * drawW,
+    y: mapCentsToY(p.cents, h)
+  }));
 
-  // petits points
+  // Courbe lisse (Catmull-Rom)
+  ctxRec.strokeStyle = getComputedStyle(document.body).getPropertyValue('--blue').trim() || '#3b82f6';
+  ctxRec.lineWidth = 3.5; // trait plus épais
+  ctxRec.lineJoin='round'; 
+  ctxRec.lineCap='round';
+  drawSmoothCurve(ctxRec, curvePoints, 0.5);
+
+  // petits points (optionnel - peut être retiré pour une courbe pure)
   ctxRec.fillStyle = '#3b82f6';
-  for(const p of pts){
-    const x = left + ((p.t - t0)/VISIBLE_WINDOW) * drawW;
-    const y = mapCentsToY(p.cents, h);
-    ctxRec.beginPath(); ctxRec.arc(x,y,2,0,Math.PI*2); ctxRec.fill();
+  for(const pt of curvePoints){
+    ctxRec.beginPath(); 
+    ctxRec.arc(pt.x, pt.y, 1.5, 0, Math.PI*2); 
+    ctxRec.fill();
   }
 }
 
@@ -266,21 +344,25 @@ function drawReference(){
   ctxRef.clearRect(0,0,w,h); ctxRef.drawImage(baseRef,0,0);
   if(refData.pitch.length===0) return;
 
+  // Préparer les points avec coordonnées canvas
+  const curvePoints = refData.pitch.map(p => ({
+    x: left + (p.t / Math.max(refData.duration,1)) * drawW,
+    y: mapCentsToY(clamp(p.cents,-Y_RANGE_CENTS,Y_RANGE_CENTS), h)
+  }));
+
+  // Courbe lisse (Catmull-Rom)
   ctxRef.strokeStyle = getComputedStyle(document.body).getPropertyValue('--violet').trim() || '#a78bfa';
-  ctxRef.lineWidth = 2.5; ctxRef.lineJoin='round'; ctxRef.lineCap='round';
-  ctxRef.beginPath();
-  let first=true;
-  for(const p of refData.pitch){
-    const x = left + (p.t / Math.max(refData.duration,1)) * drawW;
-    const y = mapCentsToY(clamp(p.cents,-Y_RANGE_CENTS,Y_RANGE_CENTS), h);
-    if(first){ ctxRef.moveTo(x,y); first=false; } else { ctxRef.lineTo(x,y); }
-  }
-  ctxRef.stroke();
+  ctxRef.lineWidth = 3.5; // trait plus épais
+  ctxRef.lineJoin='round'; 
+  ctxRef.lineCap='round';
+  drawSmoothCurve(ctxRef, curvePoints, 0.5);
+
+  // petits points (optionnel)
   ctxRef.fillStyle = '#a78bfa';
-  for(const p of refData.pitch){
-    const x = left + (p.t / Math.max(refData.duration,1)) * drawW;
-    const y = mapCentsToY(clamp(p.cents,-Y_RANGE_CENTS,Y_RANGE_CENTS), h);
-    ctxRef.beginPath(); ctxRef.arc(x,y,2,0,Math.PI*2); ctxRef.fill();
+  for(const pt of curvePoints){
+    ctxRef.beginPath(); 
+    ctxRef.arc(pt.x, pt.y, 1.5, 0, Math.PI*2); 
+    ctxRef.fill();
   }
 }
 
@@ -317,9 +399,9 @@ function initDetector(){
   try{
     if(typeof YinDetector==='undefined') throw new Error('YinDetector non disponible');
     detector = new YinDetector(audioCtx.sampleRate, 2048);
-    detector.threshold = 0.08; // plus permissif que 0.10
+    detector.threshold = 0.05; // plus sensible pour plus de détections
     pitchyStatus.textContent='Détecteur: OK'; pitchyStatus.className='badge ok';
-    log('INFO','Détecteur pitch (YinDetector) initialisé - Seuil: 0.08');
+    log('INFO','Détecteur pitch (YinDetector) initialisé - Seuil: 0.05');
     return true;
   }catch(e){
     pitchyStatus.textContent='Détecteur: ERREUR'; pitchyStatus.className='badge err';
@@ -330,10 +412,10 @@ function initSmoother(){
   try{
     if(typeof PitchSmoother==='undefined'){ log('WARN','PitchSmoother non dispo'); return false; }
     smoother = new PitchSmoother({
-      medianWindowSize:3, smoothingFactor:0.85,
-      maxPitchJump:150, minConfidence:0.2
+      medianWindowSize:5, smoothingFactor:0.75,
+      maxPitchJump:250, minConfidence:0.2
     });
-    log('INFO','PitchSmoother initialisé'); return true;
+    log('INFO','PitchSmoother initialisé (median:5, smooth:0.75, jump:250)'); return true;
   }catch(e){ log('WARN','initSmoother: '+e.message); return false; }
 }
 

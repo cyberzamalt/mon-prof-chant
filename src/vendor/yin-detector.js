@@ -5,6 +5,8 @@
  * Implémentation complète de l'algorithme YIN
  * Basé sur la recherche académique et les implémentations de production
  * 
+ * ✅ CORRIGÉ : Bug de bornes maxLag fixé (ChatGPT fix appliqué)
+ * 
  * Usage: const detector = new YinDetector(sampleRate);
  *        const pitch = detector.detect(float32array);
  */
@@ -17,6 +19,7 @@ class YinDetector {
     
     // Préallouer les buffers pour éviter allocations à chaque detection
     this.yinBuffer = new Float32Array(bufferSize);
+    this.maxLag = Math.floor(bufferSize / 2); // ✅ MÉMORISER MAXLAG
   }
 
   /**
@@ -98,17 +101,22 @@ class YinDetector {
   /**
    * Fonction de différence YIN
    * Mesure la différence entre le signal et sa version décalée
+   * 
+   * ✅ CORRIGÉ : Mémoriser maxLag pour les étapes suivantes
    */
   computeDifferenceFunction(buffer) {
     const maxLag = Math.floor(buffer.length / 2);
+    
+    // ✅ MÉMORISER pour les autres fonctions
+    this.maxLag = maxLag;
 
-    // Initialiser
-    for (let i = 0; i < this.yinBuffer.length; i++) {
+    // Initialiser UNIQUEMENT sur la zone utile
+    for (let i = 0; i <= maxLag; i++) {
       this.yinBuffer[i] = 0;
     }
 
     // Calculer l'autocorrélation inverse (différence)
-    for (let lag = 1; lag < maxLag; lag++) {
+    for (let lag = 1; lag <= maxLag; lag++) {
       let sum = 0;
       for (let i = 0; i < maxLag; i++) {
         const diff = buffer[i] - buffer[i + lag];
@@ -121,13 +129,15 @@ class YinDetector {
   /**
    * Normalisation cumulative de la fonction de différence
    * Etape cruciale de l'algorithme YIN
+   * 
+   * ✅ CORRIGÉ : Utiliser maxLag au lieu de yinBuffer.length
    */
   computeCumulativeMeanNormalizedDifference() {
-    const maxLag = this.yinBuffer.length;
+    const maxLag = this.maxLag;  // ✅ AU LIEU DE: this.yinBuffer.length
     this.yinBuffer[0] = 1;
     let cumulativeSum = 0;
 
-    for (let lag = 1; lag < maxLag; lag++) {
+    for (let lag = 1; lag <= maxLag; lag++) {
       cumulativeSum += this.yinBuffer[lag];
 
       if (cumulativeSum === 0) {
@@ -141,11 +151,13 @@ class YinDetector {
   /**
    * Trouver le minimum qui dépasse le seuil
    * Cela donne la première estimation de la période (tau)
+   * 
+   * ✅ CORRIGÉ : Utiliser maxLag au lieu de yinBuffer.length
    */
   absoluteThreshold() {
-    const maxLag = this.yinBuffer.length;
+    const maxLag = this.maxLag;  // ✅ AU LIEU DE: this.yinBuffer.length
 
-    for (let lag = 1; lag < maxLag; lag++) {
+    for (let lag = 2; lag < maxLag; lag++) {
       if (this.yinBuffer[lag] < this.threshold) {
         // Chercher le minimum local avant ce point
         while (lag + 1 < maxLag && this.yinBuffer[lag + 1] < this.yinBuffer[lag]) {
@@ -161,10 +173,13 @@ class YinDetector {
   /**
    * Affiner l'estimation avec interpolation parabolique
    * Améliore la précision de +/- 0.5 sample
+   * 
+   * ✅ CORRIGÉ : Ajouter garde pour les bornes (éviter accès hors limites)
    */
   parabolicInterpolation(tau) {
-    const maxLag = this.yinBuffer.length;
+    const maxLag = this.maxLag;
 
+    // ✅ GARDE IMPORTANTE : Vérifier que tau±1 sont dans les limites
     if (tau < 1 || tau + 1 >= maxLag) {
       return tau;
     }

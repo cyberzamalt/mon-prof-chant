@@ -46,7 +46,8 @@ input[type="file"]{padding:8px 12px;border:1px solid #22304f;border-radius:8px;b
 
 <!-- Libs -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
-<script src="./src/vendor/yin-detector.js"></script>
+<!-- ✅ CACHE BUSTING: ?v=2 ajouté après correction du bug YIN -->
+<script src="./src/vendor/yin-detector.js?v=2"></script>
 <script src="./src/utils/pitch-smoothing.js"></script>
 
 <div class="wrap">
@@ -80,7 +81,7 @@ input[type="file"]{padding:8px 12px;border:1px solid #22304f;border-radius:8px;b
   <div class="cols">
     <div class="panel">
       <p class="h2">🎙️ Ta prise (micro)</p>
-      <div class="hint">En “Absolu”, la courbe monte/descend selon la hauteur réelle (grave → aigu). “A440/Auto” affichent des cents.</div>
+      <div class="hint">En "Absolu", la courbe monte/descend selon la hauteur réelle (grave → aigu). "A440/Auto" affichent des cents.</div>
       <div class="canvasWrap">
         <canvas id="canvasRec" width="600" height="320"></canvas>
       </div>
@@ -138,11 +139,11 @@ let recordDetectionCount=0, recordDetectionRawCount=0;
 let recStart=0, timerInterval=null, rafId=null, monitorOn=false;
 let refData={pitch:[],duration:0}; let refDetectionCount=0;
 
-/* Réglages “live” */
+/* ✅ RÉGLAGES CORRIGÉS (Plan ChatGPT appliqué) */
 const VISIBLE_WINDOW = 30;
 const Y_RANGE_CENTS = 200;
 const MIN_HZ = 60, MAX_HZ = 1200;
-const DETECT_SIZE = 512;             // ↓ latence (était 1024/2048)
+const DETECT_SIZE = 2048;             // ✅ CORRIGÉ: 512 → 2048 (résolution fréquentielle + évite erreurs d'octave)
 const REFRESH_BASE_EVERY_MS = 800;
 
 /* Échelle: 'abs' | 'a440' | 'auto' */
@@ -362,7 +363,7 @@ async function activateMic(){
     if(!analyser){
       const src = audioCtx.createMediaStreamSource(micStream);
       analyser = audioCtx.createAnalyser();
-      analyser.fftSize = DETECT_SIZE;
+      analyser.fftSize = DETECT_SIZE;                           // ✅ Utilise DETECT_SIZE=2048
       analyser.smoothingTimeConstant = 0;
       src.connect(analyser);
       log('INFO','Analyser connecté ('+DETECT_SIZE+')');
@@ -384,10 +385,10 @@ function initDetector(){
   try{
     if(typeof YinDetector==='undefined') throw new Error('YinDetector non disponible');
     detector = new YinDetector(audioCtx.sampleRate, DETECT_SIZE);
-    detector.threshold = 0.04;   // un peu plus sensible
-    anaBuf = new Float32Array(DETECT_SIZE);
+    detector.threshold = 0.06;           // ✅ CORRIGÉ: 0.04 → 0.06 (point de départ optimal)
+    anaBuf = new Float32Array(DETECT_SIZE);  // ✅ Utilise DETECT_SIZE=2048
     pitchyStatus.textContent='Détecteur: OK'; pitchyStatus.className='badge ok';
-    log('INFO','Détecteur pitch initialisé - Seuil: 0.04');
+    log('INFO','Détecteur pitch initialisé - Seuil: 0.06 (YIN avec maxLag fix)');
     return true;
   }catch(e){
     pitchyStatus.textContent='Détecteur: ERREUR'; pitchyStatus.className='badge err';
@@ -398,17 +399,17 @@ function initSmoother(){
   try{
     if(typeof PitchSmoother==='undefined'){ log('WARN','PitchSmoother non dispo'); return false; }
     smoother = new PitchSmoother({
-      medianWindowSize:5, smoothingFactor:0.72,  // un poil plus réactif
+      medianWindowSize:5, smoothingFactor:0.76,  // ✅ CORRIGÉ: 0.72 → 0.76 (moins saccadé)
       maxPitchJump:250, minConfidence:0.2
     });
-    log('INFO','PitchSmoother initialisé (median:5, smooth:0.72, jump:250)'); return true;
+    log('INFO','PitchSmoother initialisé (median:5, smooth:0.76, jump:250)'); return true;
   }catch(e){ log('WARN','initSmoother: '+e.message); return false; }
 }
 
 /* ---------------- Recording ---------------- */
 function startRecording(){
   try{
-    if(!micStream) return log('WARN','Active d’abord le micro');
+    if(!micStream) return log('WARN','Active d'abord le micro');
     if(!detector) initDetector(); if(!smoother) initSmoother();
 
     chunks=[]; lastBlob=null; recordedPitch=[];
@@ -585,7 +586,7 @@ btnModeAuto.onclick = ()=>{
 };
 
 drawBaseRec(0); ctxRec.drawImage(baseRec,0,0); drawBaseRef(1); ctxRef.drawImage(baseRef,0,0);
-log('INFO','Interface prête — Live 30s, échelle ABS par défaut, fenêtre 512, ticks 1s / labels 5s');
+log('INFO','✅ Interface prête — Live 30s, échelle ABS par défaut, DETECT_SIZE=2048, threshold=0.06, smoothingFactor=0.76');
 </script>
 </body>
 </html>

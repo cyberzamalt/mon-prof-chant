@@ -21,7 +21,7 @@ body{background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Ro
 .btn:hover:not([disabled]){background:#16213a;border-color:#2a3a54}
 .btn[disabled]{opacity:.4;cursor:not-allowed}
 .seg{display:inline-flex;border:1px solid #22304f;background:var(--card);border-radius:8px;overflow:hidden}
-.seg button{padding:8px 12px;border:0;background:transparent;color:var(--text);cursor:pointer;font-size:13px;font-weight:600}
+.seg button{padding:8px 12px;border:0;background:transparent;color:#fff;cursor:pointer;font-size:13px;font-weight:600}
 .seg button.active{background:#16213a;color:#22c55e}
 .timer{padding:8px 12px;border:1px solid #22304f;border-radius:8px;background:var(--card);min-width:60px;text-align:center;font-weight:600;font-family:monospace}
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
@@ -36,7 +36,7 @@ canvas{display:block;width:100%;height:auto;background:#0b1324}
 .badge.err{color:#fecaca;border-color:#4a171f;background:#2a0f14}
 .hint{color:var(--muted);font-size:12px;margin:6px 0 8px}
 .right{margin-left:auto}
-input[type="file"]{padding:8px 12px;border:1px solid #22304f;border-radius:8px;background:#0f172a;color:var(--text);font-size:13px}
+input[type="file"]{padding:8px 12px;border:1px solid #22304f;border-radius:8px;background:#0f172a;color:#fff;font-size:13px}
 .metrics{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:12px}
 .metric{background:#0b1220;border:1px solid #22304f;border-radius:6px;padding:6px 10px}
 .debugInfo{background:#0b1020;border:1px solid #22304f;border-radius:6px;padding:6px 10px;font-size:11px;color:#cbd5e1;margin-top:8px}
@@ -73,7 +73,7 @@ input[type="file"]{padding:8px 12px;border:1px solid #22304f;border-radius:8px;b
   <div class="cols">
     <div class="panel">
       <p class="h2">🎙️ Ta prise (micro)</p>
-      <div class="hint">Courbe bleue lisse = pitch détecté (YIN 0.05). Échelle ±200 cents. Labels vocaux à gauche. Fenêtre visible : 30 s.</div>
+      <div class="hint">Courbe bleue = pitch lissé. Échelle **±200 cents autour de la note la plus proche** (auto). Fenêtre visible : 30 s.</div>
       <div class="canvasWrap">
         <canvas id="canvasRec" width="600" height="320"></canvas>
       </div>
@@ -89,7 +89,7 @@ input[type="file"]{padding:8px 12px;border:1px solid #22304f;border-radius:8px;b
 
     <div class="panel">
       <p class="h2">🎼 Référence (comparaison)</p>
-      <div class="hint">Charge un MP3/WAV local pour comparer ta courbe.</div>
+      <div class="hint">Charge un MP3/WAV local pour comparer ta courbe (déviation ±200 cents autour de la note la plus proche).</div>
       <div class="canvasWrap">
         <canvas id="canvasRef" width="600" height="320"></canvas>
       </div>
@@ -136,11 +136,6 @@ const VISIBLE_WINDOW = 30;              // secondes visibles (live)
 const Y_RANGE_CENTS = 200;              // ±200 cents (échelle plus souple)
 const MIN_HZ = 60, MAX_HZ = 1200;       // garde-fou voix élargi
 const REFRESH_BASE_EVERY_MS = 800;      // cache de la base
-const DETECT_SIZE = 2048;               // taille d'analyse YIN (évite plateau artefact)
-
-/* Garde anti-artefact YIN */
-let ARTIFACT_HZ = null;                 // ~ fs / ((N/2)+1)
-let anaBuf = null;
 
 /* DOM */
 const canvasRec=document.getElementById('canvasRec'), ctxRec=canvasRec.getContext('2d');
@@ -168,6 +163,7 @@ let lastBaseT0Sec = -1; // pour rafraîchir 1 fois/s
 function fmtTime(secs){ const mm=String(Math.floor(secs/60)).padStart(2,'0'); const ss=String(Math.floor(secs%60)).padStart(2,'0'); return `${mm}:${ss}`; }
 function updateTimer(secs){ timerRec.textContent = fmtTime(secs); }
 
+/* Cents -> Y (±Y_RANGE_CENTS) */
 function mapCentsToY(cents,height){
   const H = height - 80; // marges top/bottom
   const pxPerCent = H / (2 * Y_RANGE_CENTS);
@@ -180,42 +176,35 @@ function clamp(v,min,max){ return v<min?min:v>max?max:v; }
 function drawBaseRec(t0){
   const w=baseRec.width, h=baseRec.height; const ctx=baseRec.getContext('2d');
   ctx.clearRect(0,0,w,h);
-  // fond
   ctx.fillStyle='#0b1324'; ctx.fillRect(0,0,w,h);
-  // lignes horizontales (graves/aigus)
+
+  // lignes horizontales
   ctx.strokeStyle='#1a2642'; ctx.lineWidth=0.5;
   for(let i=0;i<5;i++){ const y=(h/4)*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
-  
+
   // 0 cent (vert pointillé)
   ctx.strokeStyle='#10b981'; ctx.setLineDash([4,4]); ctx.lineWidth=2;
   ctx.beginPath(); ctx.moveTo(0,h/2); ctx.lineTo(w,h/2); ctx.stroke(); ctx.setLineDash([]);
-  
-  // ===== LABELS VERTICAUX (HAUTEUR VOCALE) =====
+
+  // Labels (très grave → très aigu)
   ctx.fillStyle='#9ca3af'; ctx.font='9px monospace'; ctx.textAlign='left';
   const vocalLabels = [
     { cents: 200, label: '🔝 Très très aigu', y: mapCentsToY(200, h) },
     { cents: 150, label: 'Très aigu', y: mapCentsToY(150, h) },
     { cents: 100, label: 'Aigu', y: mapCentsToY(100, h) },
-    { cents: 50, label: 'Moyen aigu', y: mapCentsToY(50, h) },
-    { cents: 0, label: '🎯 Milieu (juste)', y: mapCentsToY(0, h) },
-    { cents: -50, label: 'Moyen grave', y: mapCentsToY(-50, h) },
-    { cents: -100, label: 'Grave', y: mapCentsToY(-100, h) },
-    { cents: -150, label: 'Très grave', y: mapCentsToY(-150, h) },
-    { cents: -200, label: '🔻 Très très grave', y: mapCentsToY(-200, h) }
+    { cents: 50,  label: 'Moyen aigu', y: mapCentsToY(50,  h) },
+    { cents: 0,   label: '🎯 Milieu (juste)', y: mapCentsToY(0,   h) },
+    { cents:-50,  label: 'Moyen grave', y: mapCentsToY(-50, h) },
+    { cents:-100, label: 'Grave', y: mapCentsToY(-100,h) },
+    { cents:-150, label: 'Très grave', y: mapCentsToY(-150,h) },
+    { cents:-200, label: '🔻 Très très grave', y: mapCentsToY(-200,h) }
   ];
-  
   for(const v of vocalLabels) {
     ctx.fillText(v.label, 2, v.y + 3);
-    // Tick horizontal discret
     ctx.strokeStyle='#2a3a54'; ctx.lineWidth=0.5;
     ctx.beginPath(); ctx.moveTo(0, v.y); ctx.lineTo(58, v.y); ctx.stroke();
   }
-  
-  // labels Y (cents numériques à droite)
-  ctx.fillStyle='#9ca3af'; ctx.font='11px monospace'; ctx.textAlign='right';
-  ctx.fillText(`+${Y_RANGE_CENTS}c`, 55, 16);
-  ctx.textAlign='left'; ctx.fillText(`-${Y_RANGE_CENTS}c`, 65, 16);
-  
+
   // abscisses : ticks 1s / labels 5s
   ctx.strokeStyle='#22304f'; ctx.lineWidth=0.5; ctx.fillStyle='#9ca3af'; ctx.font='10px monospace'; ctx.textAlign='center';
   const left=60, right=20, drawW = w - left - right;
@@ -238,34 +227,32 @@ function drawBaseRef(duration){
   for(let i=0;i<5;i++){ const y=(h/4)*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();}
   ctx.strokeStyle='#10b981'; ctx.setLineDash([4,4]); ctx.lineWidth=2;
   ctx.beginPath(); ctx.moveTo(0,h/2); ctx.lineTo(w,h/2); ctx.stroke(); ctx.setLineDash([]);
-  
+
   // mêmes labels
   ctx.fillStyle='#9ca3af'; ctx.font='9px monospace'; ctx.textAlign='left';
   const vocalLabels = [
     { cents: 200, label: '🔝 Très très aigu', y: mapCentsToY(200, h) },
     { cents: 150, label: 'Très aigu', y: mapCentsToY(150, h) },
     { cents: 100, label: 'Aigu', y: mapCentsToY(100, h) },
-    { cents: 50, label: 'Moyen aigu', y: mapCentsToY(50, h) },
-    { cents: 0, label: '🎯 Milieu (juste)', y: mapCentsToY(0, h) },
-    { cents: -50, label: 'Moyen grave', y: mapCentsToY(-50, h) },
-    { cents: -100, label: 'Grave', y: mapCentsToY(-100, h) },
-    { cents: -150, label: 'Très grave', y: mapCentsToY(-150, h) },
-    { cents: -200, label: '🔻 Très très grave', y: mapCentsToY(-200, h) }
+    { cents: 50,  label: 'Moyen aigu', y: mapCentsToY(50,  h) },
+    { cents: 0,   label: '🎯 Milieu (juste)', y: mapCentsToY(0,   h) },
+    { cents:-50,  label: 'Moyen grave', y: mapCentsToY(-50, h) },
+    { cents:-100, label: 'Grave', y: mapCentsToY(-100,h) },
+    { cents:-150, label: 'Très grave', y: mapCentsToY(-150,h) },
+    { cents:-200, label: '🔻 Très très grave', y: mapCentsToY(-200,h) }
   ];
   for(const v of vocalLabels) {
     ctx.fillText(v.label, 2, v.y + 3);
     ctx.strokeStyle='#2a3a54'; ctx.lineWidth=0.5;
     ctx.beginPath(); ctx.moveTo(0, v.y); ctx.lineTo(58, v.y); ctx.stroke();
   }
-  
-  ctx.fillStyle='#9ca3af'; ctx.font='11px monospace'; ctx.textAlign='right';
-  ctx.fillText(`+${Y_RANGE_CENTS}c`,55,16); ctx.textAlign='left'; ctx.fillText(`-${Y_RANGE_CENTS}c`,65,16);
-  ctx.strokeStyle='#22304f'; ctx.fillStyle='#9ca3af'; ctx.font='10px monospace'; ctx.textAlign='center';
+
+  ctx.fillStyle='#9ca3af'; ctx.font='10px monospace'; ctx.textAlign='center';
   const left=60,right=20,drawW=w-left-right;
   const step = duration<=30?1:Math.ceil(duration/30);
   for(let s=0; s<=Math.ceil(duration); s+=step){
     const x = left + (s/duration)*drawW;
-    if(x<=w-right){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); ctx.fillText(fmtTime(s), x, h-4); }
+    if(x<=w-right){ ctx.strokeStyle='#22304f'; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); ctx.fillText(fmtTime(s), x, h-4); }
   }
 }
 
@@ -298,8 +285,7 @@ function drawRec(tNow){
   const t0 = Math.max(0, tNow - VISIBLE_WINDOW);
   const baseSec = Math.floor(t0);
   if(baseSec !== lastBaseT0Sec){ drawBaseRec(t0); lastBaseT0Sec = baseSec; }
-  ctxRec.clearRect(0,0,w,h);
-  ctxRec.drawImage(baseRec, 0, 0);
+  ctxRec.clearRect(0,0,w,h); ctxRec.drawImage(baseRec, 0, 0);
 
   const pts = recordedPitch.filter(p => p.t >= t0);
   if(pts.length===0) return;
@@ -310,17 +296,11 @@ function drawRec(tNow){
   }));
 
   ctxRec.strokeStyle = getComputedStyle(document.body).getPropertyValue('--blue').trim() || '#3b82f6';
-  ctxRec.lineWidth = 3.5;
-  ctxRec.lineJoin='round'; 
-  ctxRec.lineCap='round';
+  ctxRec.lineWidth = 3.5; ctxRec.lineJoin='round'; ctxRec.lineCap='round';
   drawSmoothCurve(ctxRec, curvePoints, 0.5);
 
   ctxRec.fillStyle = '#3b82f6';
-  for(const pt of curvePoints){
-    ctxRec.beginPath(); 
-    ctxRec.arc(pt.x, pt.y, 1.5, 0, Math.PI*2); 
-    ctxRec.fill();
-  }
+  for(const pt of curvePoints){ ctxRec.beginPath(); ctxRec.arc(pt.x, pt.y, 1.5, 0, Math.PI*2); ctxRec.fill(); }
 }
 
 /* Trace courbe REF */
@@ -335,17 +315,11 @@ function drawReference(){
   }));
 
   ctxRef.strokeStyle = getComputedStyle(document.body).getPropertyValue('--violet').trim() || '#a78bfa';
-  ctxRef.lineWidth = 3.5;
-  ctxRef.lineJoin='round'; 
-  ctxRef.lineCap='round';
+  ctxRef.lineWidth = 3.5; ctxRef.lineJoin='round'; ctxRef.lineCap='round';
   drawSmoothCurve(ctxRef, curvePoints, 0.5);
 
   ctxRef.fillStyle = '#a78bfa';
-  for(const pt of curvePoints){
-    ctxRef.beginPath(); 
-    ctxRef.arc(pt.x, pt.y, 1.5, 0, Math.PI*2); 
-    ctxRef.fill();
-  }
+  for(const pt of curvePoints){ ctxRef.beginPath(); ctxRef.arc(pt.x, pt.y, 1.5, 0, Math.PI*2); ctxRef.fill(); }
 }
 
 /* ---------------- Audio init ---------------- */
@@ -366,10 +340,8 @@ async function activateMic(){
     }
     if(!analyser){
       const src = audioCtx.createMediaStreamSource(micStream);
-      analyser = audioCtx.createAnalyser();
-      analyser.fftSize = DETECT_SIZE; // 👈 aligne l'analyse sur YIN
-      src.connect(analyser);
-      log('INFO','Analyser connecté ('+DETECT_SIZE+')');
+      analyser = audioCtx.createAnalyser(); analyser.fftSize = 2048; src.connect(analyser);
+      log('INFO','Analyser connecté');
     }
     btnMic.disabled = true; btnRecStart.disabled = false;
 
@@ -382,13 +354,10 @@ async function activateMic(){
 function initDetector(){
   try{
     if(typeof YinDetector==='undefined') throw new Error('YinDetector non disponible');
-    detector = new YinDetector(audioCtx.sampleRate, DETECT_SIZE);
-    detector.threshold = 0.05; // sensible, mais stable
-    anaBuf = new Float32Array(DETECT_SIZE);
-    ARTIFACT_HZ = audioCtx.sampleRate / (Math.floor(DETECT_SIZE/2)+1);
-    log('INFO', `Détecteur pitch (YinDetector) initialisé - Seuil: 0.05`);
-    log('INFO', `Garde artefact ≈ ${ARTIFACT_HZ.toFixed(1)} Hz`);
+    detector = new YinDetector(audioCtx.sampleRate, 2048);
+    detector.threshold = 0.05; // sensible
     pitchyStatus.textContent='Détecteur: OK'; pitchyStatus.className='badge ok';
+    log('INFO','Détecteur pitch (YinDetector) initialisé - Seuil: 0.05');
     return true;
   }catch(e){
     pitchyStatus.textContent='Détecteur: ERREUR'; pitchyStatus.className='badge err';
@@ -439,8 +408,7 @@ function stopRecording(){
     if(mediaRecorder && mediaRecorder.state==='recording'){ mediaRecorder.stop(); }
     btnRecStart.disabled=false; btnRecStop.disabled=true;
     clearInterval(timerInterval); updateTimer(0);
-    monitorOn=false; // on fige l’écran (pas de clear)
-    cancelAnimationFrame(rafId); rafId=null;
+    monitorOn=false; cancelAnimationFrame(rafId); rafId=null;
   }catch(e){ log('ERROR','stopRecording: '+e.message); }
 }
 
@@ -449,22 +417,23 @@ function startMonitor(){
   if(!detector || !analyser) return;
   if(rafId) return;
 
+  const buf = new Float32Array(analyser.fftSize);
+
   const tick = ()=>{
     try{
-      analyser.getFloatTimeDomainData(anaBuf);
-      const hzRaw = detector.detect(anaBuf);
+      analyser.getFloatTimeDomainData(buf);
+      const hz = detector.detect(buf);
 
-      // ⛔️ filtre anti-plateau (artefact YIN)
-      const isArtifact = hzRaw && ARTIFACT_HZ && Math.abs(hzRaw - ARTIFACT_HZ) / ARTIFACT_HZ < 0.03;
-
-      if(hzRaw && !isArtifact && hzRaw>=MIN_HZ && hzRaw<=MAX_HZ){
+      if(hz && hz>=MIN_HZ && hz<=MAX_HZ){
         recordDetectionRawCount++;
-        const smoothed = smoother ? smoother.smooth(hzRaw) : hzRaw;
+        const smoothed = smoother ? smoother.smooth(hz) : hz;
         if(smoothed && smoothed>0){
-          const cents = 1200 * Math.log2(smoothed/440);
-          const bounded = clamp(cents, -Y_RANGE_CENTS, Y_RANGE_CENTS);
-          const t = audioCtx.currentTime - recStart;
+          // CHIRURGIEN: cents = déviation vs note MIDI la plus proche (et non vs 440 Hz)
+          const midi = 69 + 12 * Math.log2(smoothed / 440);
+          const devCents = (midi - Math.round(midi)) * 100;
+          const bounded = clamp(devCents, -Y_RANGE_CENTS, Y_RANGE_CENTS);
 
+          const t = audioCtx.currentTime - recStart;
           recordedPitch.push({t, hz: smoothed, cents: bounded});
           recordDetectionCount++;
 
@@ -479,7 +448,7 @@ function startMonitor(){
 
     // dessin
     const now = audioCtx.currentTime - recStart;
-    const needBaseRefresh = (Date.now() % REFRESH_BASE_EVERY_MS) < 16;
+    const needBaseRefresh = (Date.now() % REFRESH_BASE_EVERY_MS) < 16; // ~1 fois/800ms
     if(needBaseRefresh || Math.floor(Math.max(0, now - VISIBLE_WINDOW)) !== lastBaseT0Sec){
       drawBaseRec(Math.max(0, now - VISIBLE_WINDOW));
     }
@@ -490,10 +459,11 @@ function startMonitor(){
     if(monitorOn || (mediaRecorder && mediaRecorder.state==='recording')){
       rafId = requestAnimationFrame(tick);
     }else{
-      rafId = null;
+      rafId = null; // fige l’écran
     }
   };
 
+  // première base
   drawBaseRec(0);
   tick();
 }
@@ -549,18 +519,21 @@ fileUploadRef.addEventListener('change', async e=>{
     refData.duration = audio.duration; refDetectionCount=0;
     if(smoother && smoother.reset) smoother.reset();
 
-    const result=[]; const win=DETECT_SIZE, hop=512; let raw=0, kept=0;
+    // extraction simple
+    const result=[]; const win=2048, hop=512; let raw=0, kept=0;
     for(let i=0; i+win<=ch.length; i+=hop){
       const slice = ch.subarray(i,i+win);
       const hz = detector.detect(slice);
-      // garde anti-artefact + bornes
-      const isArtifact = hz && ARTIFACT_HZ && Math.abs(hz - ARTIFACT_HZ) / ARTIFACT_HZ < 0.03;
-      if(hz && !isArtifact && hz>=MIN_HZ && hz<=MAX_HZ){
+      if(hz && hz>=MIN_HZ && hz<=MAX_HZ){
         raw++;
         const sm = smoother ? smoother.smooth(hz) : hz;
         if(sm && sm>0){
-          kept++; const t=i/audio.sampleRate; const cents=1200*Math.log2(sm/440);
-          result.push({t, hz: sm, cents: clamp(cents,-Y_RANGE_CENTS,Y_RANGE_CENTS)});
+          // CHIRURGIEN: cents = déviation vs note MIDI la plus proche
+          const midi = 69 + 12 * Math.log2(sm / 440);
+          const devCents = (midi - Math.round(midi)) * 100;
+
+          kept++; const t=i/audio.sampleRate;
+          result.push({t, hz: sm, cents: clamp(devCents,-Y_RANGE_CENTS,Y_RANGE_CENTS)});
         }
       }
     }
@@ -584,7 +557,7 @@ btnMonOff.onclick = ()=>{ monitorOn=false; btnMonOff.classList.add('active'); bt
 btnMonOn.onclick  = ()=>{ monitorOn=true; btnMonOn.classList.add('active'); btnMonOff.classList.remove('active'); if(audioCtx) startMonitor(); };
 
 drawBaseRec(0); ctxRec.drawImage(baseRec,0,0); drawBaseRef(1); ctxRef.drawImage(baseRef,0,0);
-log('INFO','Interface prête — Live 30s, ±200c, ticks 1s / labels 5s');
+log('INFO','Interface prête — Live 30s, ±200c autour de la note, ticks 1s / labels 5s');
 </script>
 </body>
 </html>

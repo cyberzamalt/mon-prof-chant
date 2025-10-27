@@ -1,83 +1,127 @@
-<script>
-// Minimal YIN detector (CMND) – API: new YinDetector(sampleRate, bufferSize).detect(float32Array)
-// Corrige le bug classique: parcours borné à maxLag = floor(N/2) (sinon ligne plate).
-(function (global) {
-  'use strict';
-
-  function YinDetector(sampleRate, bufferSize) {
-    if (!sampleRate || !bufferSize) {
-      throw new Error('YinDetector: sampleRate and bufferSize are required');
+/* YinDetector — Pitch detection (YIN) — production-ready, vanilla JS
+   Correctifs inclus :
+   - Parcours borné à maxLag = floor(buffer.length / 2) (évite artefacts et “ligne plate”)
+   - Export global: window.YinDetector = YinDetector
+*/
+(function () {
+  class YinDetector {
+    constructor(sampleRate = 44100, bufferSize = 2048) {
+      this.sampleRate = sampleRate;
+      this.bufferSize = bufferSize | 0;
+      this.threshold = 0.06;              // sensible mais robuste (0.05–0.10)
+      this.minRMS = 0.003;                // silence gate
+      this._yin = new Float32Array(this.bufferSize);
+      this._hann = new Float32Array(this.bufferSize);
+      this._prepareHann();
     }
-    this.sampleRate = sampleRate|0;
-    this.bufferSize = bufferSize|0;
-    this.threshold = 0.06;     // recommandé pour la voix
-    this.probability = 0.0;
-    this.maxLag = Math.floor(this.bufferSize / 2);
-    this._yin = new Float32Array(this.maxLag);
+
+    setThreshold(v) {
+      const x = Math.max(0.01, Math.min(0.99, Number(v)));
+      this.threshold = x;
+    }
+
+    _prepareHann() {
+      const N = this.bufferSize;
+      for (let i = 0; i < N; i++) {
+        this._hann[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (N - 1)));
+      }
+    }
+
+    _rms(buf) {
+      let s = 0;
+      for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+      return Math.sqrt(s / buf.length);
+    }
+
+    _applyHann(src, dst) {
+      const N = src.length;
+      for (let i = 0; i < N; i++) dst[i] = src[i] * this._hann[i];
+      return dst;
+    }
+
+    // Étape 1/2 — fonction de différence cumulée normalisée (YIN)
+    _computeCMND(buffer) {
+      const N = buffer.length;
+      const maxLag = (this._maxLag = Math.floor(N / 2));  // <— CORRECTIF clé
+      const yin = this._yin;
+      yin[0] = 1;
+
+      // Différence quadratique
+      for (let tau = 1; tau < maxLag; tau++) {
+        let sum = 0;
+        for (let i = 0; i < maxLag; i++) {
+          const d = buffer[i] - buffer[i + tau];
+          sum += d * d;
+        }
+        yin[tau] = sum;
+      }
+
+      // Normalisation cumulative
+      let running = 0;
+      for (let tau = 1; tau < maxLag; tau++) {
+        running += yin[tau];
+        yin[tau] = running ? (yin[tau] * tau) / running : 1;
+      }
+    }
+
+    // Étape 3 — seuil absolu + minimum local
+    _absoluteThreshold() {
+      const yin = this._yin;
+      const maxLag = this._maxLag;        // <— bornage correct
+      const thr = this.threshold;
+
+      for (let tau = 2; tau < maxLag; tau++) {
+        if (yin[tau] < thr) {
+          while (tau + 1 < maxLag && yin[tau + 1] < yin[tau]) tau++;
+          return tau;
+        }
+      }
+      return -1;
+    }
+
+    // Étape 4 — interpolation parabolique autour du minimum
+    _parabolic(tau) {
+      const yin = this._yin;
+      const maxLag = this._maxLag;
+      if (tau < 1 || tau + 1 >= maxLag) return tau;
+      const s0 = yin[tau - 1], s1 = yin[tau], s2 = yin[tau + 1];
+      const a = (s2 - 2 * s1 + s0) / 2;
+      const b = (s2 - s0) / 2;
+      if (a === 0) return tau;
+      const shift = -b / (2 * a);
+      return (shift > -1 && shift < 1) ? tau + shift : tau;
+    }
+
+    // API principale
+    detect(float32) {
+      if (!float32 || float32.length < 64) return -1;
+
+      // Copie + fenêtre (évite bords durs)
+      const win = new Float32Array(this.bufferSize);
+      if (float32.length !== this.bufferSize) {
+        // découpe centrée si taille différente
+        const N = Math.min(float32.length, this.bufferSize);
+        const start = ((float32.length - N) / 2) | 0;
+        for (let i = 0; i < N; i++) win[i] = float32[start + i];
+        for (let i = N; i < this.bufferSize; i++) win[i] = 0;
+      } else {
+        win.set(float32);
+      }
+      if (this._rms(win) < this.minRMS) return -1;
+
+      const windowed = this._applyHann(win, win);
+      this._computeCMND(windowed);
+      const tau0 = this._absoluteThreshold();
+      if (tau0 < 0) return -1;
+      const tau = this._parabolic(tau0);
+      const freq = this.sampleRate / tau;
+
+      // Garde-fou instrument/voix
+      if (freq < 40 || freq > 2000) return -1;
+      return freq;
+    }
   }
 
-  YinDetector.prototype.detect = function (buffer) {
-    // Sécurité: on borne à la taille attendue et on recalcule maxLag
-    const N = Math.min(buffer.length, this.bufferSize);
-    if (N < 4) return null;
-    const maxLag = Math.floor(N / 2);
-    if (this._yin.length !== maxLag) this._yin = new Float32Array(maxLag);
-
-    // --- 1) Difference function d(tau)
-    for (let tau = 0; tau < maxLag; tau++) {
-      let sum = 0;
-      for (let i = 0; i < maxLag; i++) {
-        const delta = buffer[i] - buffer[i + tau];
-        sum += delta * delta;
-      }
-      this._yin[tau] = sum;
-    }
-
-    // --- 2) Cumulative Mean Normalized Difference (CMND)
-    this._yin[0] = 1;
-    let runningSum = 0;
-    for (let tau = 1; tau < maxLag; tau++) {
-      runningSum += this._yin[tau];
-      this._yin[tau] = (this._yin[tau] * tau) / (runningSum || 1);
-    }
-
-    // --- 3) Chercher premier minimum < threshold
-    let tauEstimate = -1;
-    for (let tau = 2; tau < maxLag; tau++) {
-      if (this._yin[tau] < this.threshold) {
-        // raffiner: aller jusqu'au vrai minimum local
-        while (tau + 1 < maxLag && this._yin[tau + 1] < this._yin[tau]) tau++;
-        tauEstimate = tau;
-        break;
-      }
-    }
-    if (tauEstimate === -1) {
-      // Pas de minimum sous le seuil → prendre minimum global (robuste)
-      let minVal = 1, minPos = -1;
-      for (let tau = 2; tau < maxLag; tau++) {
-        if (this._yin[tau] < minVal) { minVal = this._yin[tau]; minPos = tau; }
-      }
-      tauEstimate = minPos;
-      if (tauEstimate < 0) { this.probability = 0; return null; }
-    }
-
-    // --- 4) Interpolation parabolique autour de tauEstimate
-    const s0Idx = (tauEstimate <= 1) ? tauEstimate : tauEstimate - 1;
-    const s2Idx = (tauEstimate + 1 < maxLag) ? tauEstimate + 1 : tauEstimate;
-    const s0 = this._yin[s0Idx];
-    const s1 = this._yin[tauEstimate];
-    const s2 = this._yin[s2Idx];
-    const denom = (2 * s1 - s2 - s0);
-    const delta = denom !== 0 ? (s2 - s0) / (2 * denom) : 0;
-    const tauInterp = tauEstimate + delta;
-
-    const freq = this.sampleRate / (tauInterp || tauEstimate || 1);
-    this.probability = 1 - s1;
-
-    if (!isFinite(freq) || freq <= 0) return null;
-    return freq;
-  };
-
-  global.YinDetector = YinDetector;
-})(typeof window !== 'undefined' ? window : globalThis);
-</script>
+  // Export global (compat <script>)
+  window.YinDetector = YinDetector;
+})();

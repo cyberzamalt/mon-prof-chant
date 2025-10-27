@@ -2,74 +2,224 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <title>Test Audio Core — Pitch Detection + Recording</title>
+  <title>Test Audio Core — Enregistrement + Détection Pitch</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root{--bg:#0b1220;--panel:#0e1729;--card:#111a2e;--text:#e5e7eb;--muted:#9ca3af;--ok:#10b981}
-    *{box-sizing:border-box} html,body{height:100%;margin:0} body{background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
-    .wrap{max-width:1200px;margin:20px auto;padding:0 16px}
-    .h1{font-weight:800;font-size:20px;margin:0 0 16px}
-    .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
-    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid #1f2a44;background:#111a2e;color:var(--text);border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:13px}
-    .btn.active{background:#16213a;color:#22c55e} .badge{margin-left:auto;border:1px solid #22304f;background:#0b1220;padding:4px 8px;border-radius:6px;font-size:12px}
-    .badge.ok{color:#bbf7d0;border-color:#206a44;background:#052216} .badge.err{color:#fecaca;border-color:#4a171f;background:#2a0f14}
-    .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px} @media(max-width:1024px){.cols{grid-template-columns:1fr}}
-    .panel{background:#0e1729;border:1px solid #1f2a44;border-radius:12px;padding:16px} .hint{color:var(--muted);font-size:12px;margin:6px 0 8px}
-    .canvasWrap{border:1px solid #1f2a44;border-radius:8px;padding:4px;background:#0b1324;margin:8px 0} canvas{display:block;width:100%;height:auto;background:#0b1324}
-    .log{background:#0b1020;border:1px solid #1f2a44;border-radius:8px;padding:12px;color:#dbeafe;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;max-height:220px;overflow:auto;white-space:pre-wrap}
-    .seg{display:inline-flex;border:1px solid #22304f;background:#111a2e;border-radius:8px;overflow:hidden} .seg .btn{border:0}
+    body{margin:0;background:#0b1220;color:#e5e7eb;font:14px system-ui,Segoe UI,Roboto,Arial}
+    .wrap{max-width:1200px;margin:24px auto;padding:0 16px}
+    .bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+    .btn{border:1px solid #22304f;background:#111a2e;color:#e5e7eb;border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:600}
+    .btn[disabled]{opacity:.5;cursor:not-allowed}
+    .panel{background:#0e1729;border:1px solid #1f2a44;border-radius:12px;padding:16px;margin-bottom:12px}
+    .canvas{width:100%;height:280px;background:#0b1324;border:1px solid #1f2a44;border-radius:8px}
+    .badge{padding:6px 10px;border-radius:6px;border:1px solid #22304f;background:#0b1220}
+    .ok{color:#bbf7d0;border-color:#206a44;background:#052216}
+    .err{color:#fecaca;border-color:#4a171f;background:#2a0f14}
+    pre{background:#0b1020;border:1px solid #1f2a44;border-radius:8px;padding:12px;max-height:240px;overflow:auto}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="h1">🎵 Test Audio Core — Enregistrement + Détection Pitch (LISSÉE)</div>
+<div class="wrap">
+  <h1>🎵 Test Audio Core — Enregistrement + Détection Pitch (LISSÉE)</h1>
 
-    <div class="bar">
-      <button id="btnMic" class="btn">🎤 Activer micro</button>
-      <div class="seg">
-        <button id="btnRecStart" class="btn">▶ Enregistrer</button>
-        <button id="btnRecStop" class="btn">⏹ Stop</button>
-      </div>
-      <span id="timerRec" class="btn">00:00</span>
-      <div class="seg">
-        <button id="btnMonOff" class="btn">Moniteur OFF</button>
-        <button id="btnMonOn"  class="btn">Moniteur ON</button>
-      </div>
-      <div class="seg">
-        <button id="btnScaleAbs" class="btn active">Absolu</button>
-        <button id="btnMode440"  class="btn">A440</button>
-        <button id="btnModeAuto"  class="btn">Auto</button>
-      </div>
-      <span id="pitchyStatus" class="badge">Détecteur: chargement…</span>
-    </div>
-
-    <div class="cols">
-      <div class="panel">
-        <p><b>🎙️ Ta prise (micro)</b></p>
-        <div class="hint">En “Absolu”, la courbe monte/descend selon la hauteur réelle (grave → aigu). “A440/Auto” = écart en cents.</div>
-        <div class="canvasWrap"><canvas id="canvasRec" width="640" height="320"></canvas></div>
-        <div id="debugRec" class="hint">Détections brutes: 0 | Points lissés: 0</div>
-      </div>
-      <div class="panel">
-        <p><b>🎼 Référence (comparaison)</b></p>
-        <div class="hint">(Référence désactivée ici pour simplifier — on la remettra après stabilisation live)</div>
-        <div class="canvasWrap"><canvas id="canvasRef" width="640" height="320"></canvas></div>
-        <div class="hint">—</div>
-      </div>
-    </div>
-
-    <div class="h1">📋 Logs</div>
-    <div id="logBox" class="log">Démarrage…</div>
+  <div class="bar">
+    <button id="btnMic" class="btn">🎤 Activer micro</button>
+    <button id="btnRec" class="btn" disabled>▶ Enregistrer</button>
+    <button id="btnStop" class="btn" disabled>⏹ Stop</button>
+    <span id="status" class="badge">Détecteur: chargement…</span>
+    <span id="modeAbs"  class="badge ok">Absolu</span>
+    <span id="modeA440" class="badge">A440</span>
+    <span id="modeAuto" class="badge">Auto</span>
   </div>
 
-  <!-- Libs externes éventuelles -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+  <div class="panel">
+    <canvas id="canvas" class="canvas" width="900" height="280"></canvas>
+  </div>
 
-  <!-- Modules projet (ordre important) -->
-  <script src="./assets/js/pitch/yin-detector.js"></script>
-  <!-- (Optionnel) si tu as un smoother dédié : <script src="./assets/js/pitch/pitch-smoothing.js"></script> -->
-  <script src="./assets/js/draw.js"></script>
-  <script src="./assets/js/audio-engine.js"></script>
-  <script src="./assets/js/app.js"></script>
+  <h3>Logs</h3>
+  <pre id="log">Démarrage…</pre>
+</div>
+
+<!-- Librairies & utilitaires -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<!-- Chemins RELATIFS au fichier (correspondent à ton repo) -->
+<script src="./assets/vendor/yin-detector.js"></script>
+<script src="./assets/utils/pitch-smoothing.js"></script>
+
+<script>
+  // ====== Utils log ======
+  const $log = document.getElementById('log');
+  function log(level, msg) {
+    const t = new Date().toTimeString().slice(0,8);
+    $log.textContent += `\n[${t}] [${level}] ${msg}`;
+    $log.scrollTop = $log.scrollHeight;
+  }
+
+  // ====== État ======
+  let audioCtx=null, analyser=null, mic=null, mediaRecorder=null;
+  let chunks=[], recording=false, monitor=false, raf=null;
+  let detector=null, smoother=null;
+  let recStart=0;
+  const MIN_HZ=60, MAX_HZ=1200, VISIBLE=30;
+
+  // ====== DOM ======
+  const btnMic = document.getElementById('btnMic');
+  const btnRec = document.getElementById('btnRec');
+  const btnStop = document.getElementById('btnStop');
+  const status = document.getElementById('status');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  // ====== Dessin base ======
+  function drawBase() {
+    const w=canvas.width, h=canvas.height;
+    ctx.clearRect(0,0,w,h);
+    ctx.fillStyle='#0b1324'; ctx.fillRect(0,0,w,h);
+
+    ctx.strokeStyle='#1a2642'; ctx.lineWidth=1;
+    for(let i=0;i<=10;i++){
+      const y=(h-20)*i/10+10;
+      ctx.beginPath(); ctx.moveTo(50,y); ctx.lineTo(w-10,y); ctx.stroke();
+    }
+
+    // ligne médiane
+    ctx.strokeStyle='#10b981'; ctx.setLineDash([5,5]); ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(50,h/2); ctx.lineTo(w-10,h/2); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  drawBase();
+
+  // ====== Helpers mapping ======
+  function hzToMidi(hz) { return 69 + 12*Math.log2(hz/440); }
+  const MIDI_MIN = hzToMidi(MIN_HZ), MIDI_MAX = hzToMidi(MAX_HZ);
+  function yAbs(hz){
+    const h=canvas.height, top=10, bot=h-10;
+    const n=(hzToMidi(hz)-MIDI_MIN)/(MIDI_MAX-MIDI_MIN);
+    return bot - Math.max(0,Math.min(1,n))*(bot-top);
+  }
+
+  // ====== Init audio & mic ======
+  async function ensureAudio(){
+    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended') await audioCtx.resume();
+  }
+
+  async function activateMic(){
+    try{
+      await ensureAudio();
+      if(!mic){
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false }
+        });
+        mic = audioCtx.createMediaStreamSource(stream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0;
+        mic.connect(analyser);
+      }
+
+      // Charge YIN + smoother
+      if(typeof YinDetector === 'undefined'){
+        status.className='badge err';
+        status.textContent='Détecteur: ERREUR (yin-detector.js non chargé)';
+        log('ERROR','YinDetector introuvable (vérifier chemin ./assets/vendor/yin-detector.js)');
+        return;
+      }
+      detector = new YinDetector(audioCtx.sampleRate, analyser.fftSize);
+      detector.setThreshold(0.06);
+      smoother = (typeof PitchSmoother!=='undefined') ? new PitchSmoother({
+        medianWindowSize:5, smoothingFactor:0.75, maxPitchJump:250
+      }) : null;
+
+      status.className='badge ok';
+      status.textContent='Détecteur: OK';
+      btnRec.disabled=false;
+      log('INFO','Micro OK, Analyser prêt ('+analyser.fftSize+'), Détecteur OK');
+    }catch(e){
+      log('ERROR','activateMic: '+e.message);
+    }
+  }
+
+  // ====== Monitor (détection live + dessin) ======
+  const buf = new Float32Array(2048);
+  const points=[]; // {t,y}
+  function startMonitor(){
+    if(monitor) return;
+    monitor = true;
+    recStart = audioCtx.currentTime;
+    tick();
+  }
+  function stopMonitor(){
+    monitor = false;
+    if(raf){ cancelAnimationFrame(raf); raf=null; }
+  }
+
+  function tick(){
+    try{
+      analyser.getFloatTimeDomainData(buf);
+      const hz = detector.detect(buf);
+
+      const t = audioCtx.currentTime - recStart;
+      const left=50, right=10, w=canvas.width, h=canvas.height;
+      const drawW = w-left-right;
+
+      if (hz && hz>=MIN_HZ && hz<=MAX_HZ) {
+        const sm = smoother ? smoother.smooth(hz) : hz;
+        if (sm && sm>0) {
+          // push point
+          points.push({t, y:yAbs(sm)});
+          // purge
+          const t0 = t - VISIBLE;
+          while(points.length && points[0].t < t0) points.shift();
+        }
+      }
+
+      // redraw
+      drawBase();
+      if(points.length>1){
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 3; ctx.lineJoin='round'; ctx.lineCap='round';
+        ctx.beginPath();
+        for(let i=0;i<points.length;i++){
+          const x = left + ((points[i].t - (t-VISIBLE))/VISIBLE)*drawW;
+          if(i===0) ctx.moveTo(x, points[i].y);
+          else ctx.lineTo(x, points[i].y);
+        }
+        ctx.stroke();
+      }
+    }catch(e){
+      console.error(e);
+    }
+    if(monitor) raf = requestAnimationFrame(tick);
+  }
+
+  // ====== Enregistrement ======
+  function startRec(){
+    if(!mic){ log('WARN','Active d’abord le micro'); return; }
+    try{
+      const stream = mic.mediaStream || mic.context.createMediaStreamDestination().stream;
+      mediaRecorder = new MediaRecorder(stream, { mimeType:'audio/webm;codecs=opus' });
+      mediaRecorder.ondataavailable = e=>{ if(e.data?.size) chunks.push(e.data); };
+      mediaRecorder.onstop = ()=>{ log('INFO','Enregistrement terminé ('+(chunks[0]?.size||0)+' octets)'); };
+      chunks=[]; mediaRecorder.start(100);
+      recording=true; btnRec.disabled=true; btnStop.disabled=false;
+      startMonitor();
+      log('INFO','Enregistrement démarré');
+    }catch(e){ log('ERROR','startRec: '+e.message); }
+  }
+
+  function stopRec(){
+    try{
+      if(mediaRecorder && recording){ mediaRecorder.stop(); recording=false; }
+      btnRec.disabled=false; btnStop.disabled=true;
+      stopMonitor();
+    }catch(e){ log('ERROR','stopRec: '+e.message); }
+  }
+
+  // ====== Events ======
+  btnMic.addEventListener('click', activateMic);
+  btnRec.addEventListener('click', startRec);
+  btnStop.addEventListener('click', stopRec);
+</script>
 </body>
 </html>

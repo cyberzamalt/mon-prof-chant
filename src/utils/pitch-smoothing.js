@@ -1,52 +1,50 @@
-<script>
-// Smoother réactif: médiane (anti-outliers) + filtre IIR simple.
-// API: new PitchSmoother(opts).smooth(hz, clarity?) → hz lissé | null ; .reset()
-(function (global) {
-  'use strict';
+/* assets/utils/pitch-smoothing.js */
+(function () {
+  class PitchSmoother {
+    constructor(opt = {}) {
+      this.medianWindowSize = opt.medianWindowSize || 5;
+      this.smoothingFactor = opt.smoothingFactor || 0.75;
+      this.maxPitchJump = opt.maxPitchJump || 250; // Hz max/frame
+      this.minConfidence = opt.minConfidence || 0.2;
 
-  function median(arr) {
-    const a = arr.slice().sort((x, y) => x - y);
-    const m = a.length >> 1;
-    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
-  }
-
-  function PitchSmoother(opts) {
-    const o = opts || {};
-    this.medianWindowSize = o.medianWindowSize ?? 5;
-    this.smoothingFactor  = o.smoothingFactor  ?? 0.75; // 0.7-0.8 = réactif
-    this.maxPitchJump     = o.maxPitchJump     ?? 250;  // Hz/frame max
-    this.minConfidence    = o.minConfidence    ?? 0.0;  // si clarity fourni
-    this._win = [];
-    this._last = null;
-  }
-
-  PitchSmoother.prototype.reset = function () {
-    this._win.length = 0;
-    this._last = null;
-  };
-
-  PitchSmoother.prototype.smooth = function (hz, clarity) {
-    if (!hz || hz <= 0) return null;
-    if (typeof clarity === 'number' && clarity < this.minConfidence) return null;
-
-    // médiane anti-outliers
-    this._win.push(hz);
-    if (this._win.length > this.medianWindowSize) this._win.shift();
-    const med = median(this._win);
-
-    // Rejeter sauts aberrants (octave-jumps)
-    if (this._last && Math.abs(med - this._last) > this.maxPitchJump) {
-      // garder l'ancien si blow-up transitoire
-      return this._last;
+      this._median = [];
+      this._last = null;
     }
 
-    // IIR: out = a*med + (1-a)*last
-    const a = this.smoothingFactor;
-    const out = (this._last == null) ? med : (a * med + (1 - a) * this._last);
-    this._last = out;
-    return out;
-  };
+    reset() {
+      this._median = [];
+      this._last = null;
+    }
 
-  global.PitchSmoother = PitchSmoother;
-})(typeof window !== 'undefined' ? window : globalThis);
-</script>
+    smooth(hz, confidence = 1.0) {
+      if (!hz || hz <= 0 || confidence < this.minConfidence) return null;
+
+      // median
+      this._median.push(hz);
+      if (this._median.length > this.medianWindowSize) this._median.shift();
+      const med = this._median
+        .slice()
+        .sort((a, b) => a - b)[Math.floor(this._median.length / 2)];
+
+      // anti-saut simple
+      if (this._last !== null) {
+        const jump = Math.abs(med - this._last);
+        if (jump > this.maxPitchJump) {
+          // rejette le saut anormal, garde last
+          return this._last;
+        }
+      }
+
+      // EMA
+      if (this._last === null) {
+        this._last = med;
+      } else {
+        const a = this.smoothingFactor;
+        this._last = a * med + (1 - a) * this._last;
+      }
+      return this._last;
+    }
+  }
+
+  window.PitchSmoother = PitchSmoother;
+})();

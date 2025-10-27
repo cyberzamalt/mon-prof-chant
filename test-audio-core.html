@@ -1,559 +1,75 @@
 <!doctype html>
 <html lang="fr">
 <head>
-<meta charset="utf-8" />
-<title>Test Audio Core — Pitch Detection + Recording</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>
-:root{
-  --bg:#0b1220;--panel:#0e1729;--card:#111a2e;--grid:#1a2642;
-  --text:#e5e7eb;--muted:#9ca3af;--ok:#10b981;--err:#ef4444;
-  --blue:#3b82f6;--violet:#a78bfa
-}
-*{box-sizing:border-box}
-html,body{height:100%;margin:0}
-body{background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
-.wrap{max-width:1400px;margin:20px auto;padding:0 16px}
-.h1{font-weight:800;font-size:20px;margin:0 0 16px}
-.h2{font-weight:700;font-size:14px;margin:0 0 8px}
-.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
-.btn{display:inline-flex;align-items:center;gap:8px;border:1px solid #1f2a44;background:var(--card);color:var(--text);border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:13px;transition:.2s}
-.btn:hover:not([disabled]){background:#16213a;border-color:#2a3a54}
-.btn[disabled]{opacity:.4;cursor:not-allowed}
-.seg{display:inline-flex;border:1px solid #22304f;background:var(--card);border-radius:8px;overflow:hidden}
-.seg button{padding:8px 12px;border:0;background:transparent;color:var(--text);cursor:pointer;font-size:13px;font-weight:600}
-.seg button.active{background:#16213a;color:#22c55e}
-.timer{padding:8px 12px;border:1px solid #22304f;border-radius:8px;background:var(--card);min-width:60px;text-align:center;font-weight:600;font-family:monospace}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
-@media(max-width:1024px){.cols{grid-template-columns:1fr}}
-.panel{background:var(--panel);border:1px solid #1f2a44;border-radius:12px;padding:16px}
-.canvasWrap{border:1px solid #1f2a44;border-radius:8px;padding:4px;background:#0b1324;margin:8px 0;position:relative}
-canvas{display:block;width:100%;height:auto;background:#0b1324}
-.controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
-.log{background:#0b1020;border:1px solid #1f2a44;border-radius:8px;padding:12px;color:#dbeafe;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;max-height:250px;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
-.badge{display:inline-flex;gap:6px;align-items:center;border:1px solid #22304f;background:#0b1220;padding:4px 8px;border-radius:6px;font-size:12px}
-.badge.ok{color:#bbf7d0;border-color:#206a44;background:#052216}
-.badge.err{color:#fecaca;border-color:#4a171f;background:#2a0f14}
-.hint{color:var(--muted);font-size:12px;margin:6px 0 8px}
-.right{margin-left:auto}
-input[type="file"]{padding:8px 12px;border:1px solid #22304f;border-radius:8px;background:#0f172a;color:var(--text);font-size:13px}
-.metrics{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:12px}
-.metric{background:#0b1220;border:1px solid #22304f;border-radius:6px;padding:6px 10px}
-.debugInfo{background:#0b1020;border:1px solid #1f2a44;border-radius:6px;padding:6px 10px;font-size:11px;color:#cbd5e1;margin-top:8px}
-</style>
+  <meta charset="utf-8" />
+  <title>Test Audio Core — Pitch Detection + Recording</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{--bg:#0b1220;--panel:#0e1729;--card:#111a2e;--text:#e5e7eb;--muted:#9ca3af;--ok:#10b981}
+    *{box-sizing:border-box} html,body{height:100%;margin:0} body{background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
+    .wrap{max-width:1200px;margin:20px auto;padding:0 16px}
+    .h1{font-weight:800;font-size:20px;margin:0 0 16px}
+    .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid #1f2a44;background:#111a2e;color:var(--text);border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:13px}
+    .btn.active{background:#16213a;color:#22c55e} .badge{margin-left:auto;border:1px solid #22304f;background:#0b1220;padding:4px 8px;border-radius:6px;font-size:12px}
+    .badge.ok{color:#bbf7d0;border-color:#206a44;background:#052216} .badge.err{color:#fecaca;border-color:#4a171f;background:#2a0f14}
+    .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px} @media(max-width:1024px){.cols{grid-template-columns:1fr}}
+    .panel{background:#0e1729;border:1px solid #1f2a44;border-radius:12px;padding:16px} .hint{color:var(--muted);font-size:12px;margin:6px 0 8px}
+    .canvasWrap{border:1px solid #1f2a44;border-radius:8px;padding:4px;background:#0b1324;margin:8px 0} canvas{display:block;width:100%;height:auto;background:#0b1324}
+    .log{background:#0b1020;border:1px solid #1f2a44;border-radius:8px;padding:12px;color:#dbeafe;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;max-height:220px;overflow:auto;white-space:pre-wrap}
+    .seg{display:inline-flex;border:1px solid #22304f;background:#111a2e;border-radius:8px;overflow:hidden} .seg .btn{border:0}
+  </style>
 </head>
 <body>
+  <div class="wrap">
+    <div class="h1">🎵 Test Audio Core — Enregistrement + Détection Pitch (LISSÉE)</div>
 
-<!-- Libs tierces si besoin (Tone non requis ici) -->
-<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script> -->
-
-<!-- Nos modules corrigés -->
-<!-- IMPORTANT: garder ces <script> AVANT le bloc principal pour qu'ils soient disponibles -->
-<script src="./src/vendor/yin-detector.js"></script>
-<script src="./src/utils/pitch-smoothing.js"></script>
-
-<div class="wrap">
-  <div class="h1">🎵 Test Audio Core — Enregistrement + Détection Pitch (LISSÉE)</div>
-
-  <div class="bar">
-    <button id="btnMic" class="btn">🎤 Activer micro</button>
-
-    <div class="seg">
-      <button id="btnRecStart" class="btn" disabled>▶ Enregistrer</button>
-      <button id="btnRecStop" class="btn" disabled>⏹ Stop</button>
+    <div class="bar">
+      <button id="btnMic" class="btn">🎤 Activer micro</button>
+      <div class="seg">
+        <button id="btnRecStart" class="btn">▶ Enregistrer</button>
+        <button id="btnRecStop" class="btn">⏹ Stop</button>
+      </div>
+      <span id="timerRec" class="btn">00:00</span>
+      <div class="seg">
+        <button id="btnMonOff" class="btn">Moniteur OFF</button>
+        <button id="btnMonOn"  class="btn">Moniteur ON</button>
+      </div>
+      <div class="seg">
+        <button id="btnScaleAbs" class="btn active">Absolu</button>
+        <button id="btnMode440"  class="btn">A440</button>
+        <button id="btnModeAuto"  class="btn">Auto</button>
+      </div>
+      <span id="pitchyStatus" class="badge">Détecteur: chargement…</span>
     </div>
 
-    <div class="timer" id="timerRec">00:00</div>
-
-    <div class="seg">
-      <button id="btnMonOff" class="btn">Moniteur OFF</button>
-      <button id="btnMonOn"  class="btn">Moniteur ON</button>
+    <div class="cols">
+      <div class="panel">
+        <p><b>🎙️ Ta prise (micro)</b></p>
+        <div class="hint">En “Absolu”, la courbe monte/descend selon la hauteur réelle (grave → aigu). “A440/Auto” = écart en cents.</div>
+        <div class="canvasWrap"><canvas id="canvasRec" width="640" height="320"></canvas></div>
+        <div id="debugRec" class="hint">Détections brutes: 0 | Points lissés: 0</div>
+      </div>
+      <div class="panel">
+        <p><b>🎼 Référence (comparaison)</b></p>
+        <div class="hint">(Référence désactivée ici pour simplifier — on la remettra après stabilisation live)</div>
+        <div class="canvasWrap"><canvas id="canvasRef" width="640" height="320"></canvas></div>
+        <div class="hint">—</div>
+      </div>
     </div>
 
-    <!-- ÉCHELLE -->
-    <div class="seg">
-      <button id="btnScaleAbs"  class="btn active">Absolu</button>
-      <button id="btnMode440"   class="btn">A440</button>
-      <button id="btnModeAuto"  class="btn">Auto</button>
-    </div>
-
-    <span class="right badge" id="pitchyStatus">Détecteur: chargement…</span>
+    <div class="h1">📋 Logs</div>
+    <div id="logBox" class="log">Démarrage…</div>
   </div>
 
-  <div class="cols">
-    <div class="panel">
-      <p class="h2">🎙️ Ta prise (micro)</p>
-      <div class="hint">En “Absolu”, la courbe monte/descend avec la hauteur réelle. “A440/Auto” = écart en cents.</div>
-      <div class="canvasWrap">
-        <canvas id="canvasRec" width="600" height="320"></canvas>
-      </div>
-      <div class="debugInfo" id="debugRec">Détections brutes: 0 | Points lissés: 0</div>
-      <div class="controls">
-        <button id="btnDownWebM" class="btn" disabled>⬇️ WebM</button>
-        <button id="btnDownWAV" class="btn" disabled>🎧 WAV</button>
-        <button id="btnDownMP3" class="btn" disabled>🎵 MP3</button>
-        <button id="btnClearRec" class="btn">🗑️ Effacer</button>
-        <input type="file" id="fileUploadRec" accept="audio/*" class="btn" />
-      </div>
-    </div>
+  <!-- Libs externes éventuelles -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 
-    <div class="panel">
-      <p class="h2">🎼 Référence (comparaison)</p>
-      <div class="hint">Charge un MP3/WAV local pour comparer ta courbe.</div>
-      <div class="canvasWrap">
-        <canvas id="canvasRef" width="600" height="320"></canvas>
-      </div>
-      <div class="debugInfo" id="debugRef">Détections brutes: 0 | Points lissés: 0</div>
-      <div class="controls">
-        <input type="file" id="fileUploadRef" accept="audio/*" class="btn" />
-        <button id="btnClearRef" class="btn">🗑️ Effacer</button>
-      </div>
-      <div class="metrics" id="metricsRef">
-        <div class="metric">Écart moy: <b id="mAvg">—</b></div>
-        <div class="metric">Écart max: <b id="mMax">—</b></div>
-        <div class="metric">% juste: <b id="mInTune">—</b></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="h1">📋 Logs</div>
-  <div id="logBox" class="log">Démarrage…</div>
-</div>
-
-<!-- (facultatif) Exports WAV/MP3 si tu as ces utils -->
-<script src="./src/utils/wav-export.js"></script>
-<script src="./src/utils/mp3-export.js"></script>
-
-<script>
-/* ---------------- Logger ---------------- */
-const logBox = document.getElementById('logBox');
-const log = (lvl,msg)=>{
-  const n=new Date(),h=String(n.getHours()).padStart(2,'0'),m=String(n.getMinutes()).padStart(2,'0'),s=String(n.getSeconds()).padStart(2,'0');
-  logBox.textContent += `[${h}:${m}:${s}] [${lvl}] ${msg}\n`;
-  logBox.scrollTop = logBox.scrollHeight;
-};
-
-/* ---------------- State ---------------- */
-let audioCtx=null, analyser=null, micStream=null, mediaRecorder=null;
-let chunks=[], lastBlob=null;
-let detector=null, smoother=null;
-let recordedPitch=[]; // {t,hz}
-let recordDetectionCount=0, recordDetectionRawCount=0;
-let recStart=0, timerInterval=null, rafId=null, monitorOn=false;
-let refData={pitch:[],duration:0}; let refDetectionCount=0;
-
-/* Réglages */
-const VISIBLE_WINDOW = 30;
-const Y_RANGE_CENTS = 200;
-const MIN_HZ = 60, MAX_HZ = 1200;
-const DETECT_SIZE = 2048;             // <-- précision & stabilité
-const REFRESH_BASE_EVERY_MS = 800;
-
-/* Échelle: 'abs' | 'a440' | 'auto' */
-let scaleMode = 'abs';
-
-/* DOM refs */
-const canvasRec=document.getElementById('canvasRec'), ctxRec=canvasRec.getContext('2d');
-const canvasRef=document.getElementById('canvasRef'), ctxRef=canvasRef.getContext('2d');
-const btnMic=document.getElementById('btnMic');
-const btnRecStart=document.getElementById('btnRecStart');
-const btnRecStop=document.getElementById('btnRecStop');
-const timerRec=document.getElementById('timerRec');
-const btnMonOff=document.getElementById('btnMonOff');
-const btnMonOn=document.getElementById('btnMonOn');
-const btnScaleAbs=document.getElementById('btnScaleAbs');
-const btnMode440=document.getElementById('btnMode440');
-const btnModeAuto=document.getElementById('btnModeAuto');
-const pitchyStatus=document.getElementById('pitchyStatus');
-const debugRec=document.getElementById('debugRec');
-const debugRef=document.getElementById('debugRef');
-const mAvg=document.getElementById('mAvg'), mMax=document.getElementById('mMax'), mInTune=document.getElementById('mInTune');
-const fileUploadRec=document.getElementById('fileUploadRec'), fileUploadRef=document.getElementById('fileUploadRef');
-const btnDownWebM=document.getElementById('btnDownWebM'), btnDownWAV=document.getElementById('btnDownWAV'), btnDownMP3=document.getElementById('btnDownMP3');
-const btnClearRec=document.getElementById('btnClearRec'), btnClearRef=document.getElementById('btnClearRef');
-
-/* Offscreen bases */
-const baseRec = document.createElement('canvas'); baseRec.width=canvasRec.width; baseRec.height=canvasRec.height;
-const baseRef = document.createElement('canvas'); baseRef.width=canvasRef.width; baseRef.height=canvasRef.height;
-let lastBaseT0Sec = -1;
-
-/* ---------------- Helpers ---------------- */
-function fmtTime(secs){ const mm=String(Math.floor(secs/60)).padStart(2,'0'); const ss=String(Math.floor(secs%60)).padStart(2,'0'); return `${mm}:${ss}`; }
-function updateTimer(secs){ timerRec.textContent = fmtTime(secs); }
-function clamp(v,min,max){ return v<min?min:v>max?max:v; }
-function hzToMidi(hz){ return 69 + 12 * Math.log2(hz/440); }
-const MIDI_MIN = hzToMidi(MIN_HZ), MIDI_MAX = hzToMidi(MAX_HZ);
-
-function centsFrom(hz, mode){
-  if (mode==='a440') return 1200 * Math.log2(hz / 440);
-  const midi = Math.round(hzToMidi(hz));
-  const baseHz = 440 * Math.pow(2, (midi - 69) / 12);
-  return 1200 * Math.log2(hz / baseHz);
-}
-function mapCentsToY(cents,height){
-  const H = height - 80; const mid = height/2;
-  const pxPerCent = H / (2 * Y_RANGE_CENTS);
-  return mid - clamp(cents, -Y_RANGE_CENTS, Y_RANGE_CENTS) * pxPerCent;
-}
-function mapMidiToY(midi,height){
-  const top=20, bottom=height-60;
-  const n = (midi - MIDI_MIN) / (MIDI_MAX - MIDI_MIN);
-  return bottom - clamp(n,0,1) * (bottom-top);
-}
-function mapPitchToY(hz,height){
-  if (scaleMode==='abs') return mapMidiToY(hzToMidi(hz), height);
-  if (scaleMode==='a440') return mapCentsToY(centsFrom(hz,'a440'), height);
-  return mapCentsToY(centsFrom(hz,'auto'), height);
-}
-
-/* Dessins base */
-function drawBaseRec(t0){
-  const w=baseRec.width, h=baseRec.height; const ctx=baseRec.getContext('2d');
-  ctx.clearRect(0,0,w,h);
-  ctx.fillStyle='#0b1324'; ctx.fillRect(0,0,w,h);
-  ctx.strokeStyle='#1a2642'; ctx.lineWidth=0.5;
-  for(let i=0;i<5;i++){ const y=(h/4)*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
-  ctx.strokeStyle='#10b981'; ctx.setLineDash([4,4]); ctx.lineWidth=2;
-  ctx.beginPath(); ctx.moveTo(0,h/2); ctx.lineTo(w,h/2); ctx.stroke(); ctx.setLineDash([]);
-  ctx.fillStyle='#9ca3af'; ctx.font='9px monospace'; ctx.textAlign='left';
-  const labels=['🔝 Très très aigu','Très aigu','Aigu','Moyen aigu','🎯 Milieu','Moyen grave','Grave','Très grave','🔻 Très très grave'];
-  const pos=[0.05,0.18,0.30,0.42,0.50,0.58,0.70,0.82,0.95];
-  for(let i=0;i<labels.length;i++){
-    const y = pos[i]*(h-80)+40;
-    ctx.fillText(labels[i],2,y+3);
-    ctx.strokeStyle='#2a3a54'; ctx.lineWidth=0.5;
-    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(58,y); ctx.stroke();
-  }
-  ctx.strokeStyle='#22304f'; ctx.lineWidth=0.5; ctx.fillStyle='#9ca3af'; ctx.font='10px monospace'; ctx.textAlign='center';
-  const left=60, right=20, drawW = w - left - right;
-  const startSec = Math.floor(t0);
-  for(let s=startSec; s<=t0+VISIBLE_WINDOW; s+=1){
-    const x = left + ((s - t0)/VISIBLE_WINDOW) * drawW;
-    if(x>=left && x<=w-right){
-      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
-      if(s%5===0){ ctx.fillText(fmtTime(s), x, h-4); }
-    }
-  }
-}
-function drawBaseRef(duration){
-  const w=baseRef.width, h=baseRef.height; const ctx=baseRef.getContext('2d');
-  ctx.clearRect(0,0,w,h);
-  ctx.fillStyle='#0b1324'; ctx.fillRect(0,0,w,h);
-  ctx.strokeStyle='#1a2642'; ctx.lineWidth=0.5;
-  for(let i=0;i<5;i++){ const y=(h/4)*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();}
-  ctx.strokeStyle='#10b981'; ctx.setLineDash([4,4]); ctx.lineWidth=2;
-  ctx.beginPath(); ctx.moveTo(0,h/2); ctx.lineTo(w,h/2); ctx.stroke(); ctx.setLineDash([]);
-  ctx.fillStyle='#9ca3af'; ctx.font='9px monospace'; ctx.textAlign='left';
-  const labels=['🔝 Très très aigu','Très aigu','Aigu','Moyen aigu','🎯 Milieu','Moyen grave','Grave','Très grave','🔻 Très très grave'];
-  const pos=[0.05,0.18,0.30,0.42,0.50,0.58,0.70,0.82,0.95];
-  for(let i=0;i<labels.length;i++){
-    const y = pos[i]*(h-80)+40;
-    ctx.fillText(labels[i],2,y+3);
-    ctx.strokeStyle='#2a3a54'; ctx.lineWidth=0.5;
-    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(58,y); ctx.stroke();
-  }
-  ctx.strokeStyle='#22304f'; ctx.fillStyle='#9ca3af'; ctx.font='10px monospace'; ctx.textAlign='center';
-  const left=60,right=20,drawW=w-left-right;
-  const step = duration<=30?1:Math.ceil(duration/30);
-  for(let s=0; s<=Math.ceil(duration); s+=step){
-    const x = left + (s/duration)*drawW;
-    if(x<=w-right){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); ctx.fillText(fmtTime(s), x, h-4); }
-  }
-}
-
-/* Catmull-Rom → bezier */
-function drawSmoothCurve(ctx, points, tension = 0.5) {
-  if (points.length < 2) return;
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  if (points.length === 2) {
-    ctx.lineTo(points[1].x, points[1].y);
-  } else {
-    for (let i = 0; i < points.length - 1; i++) {
-      const p0 = points[Math.max(0, i - 1)];
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      const p3 = points[Math.min(points.length - 1, i + 2)];
-      const cp1x = p1.x + (p2.x - p0.x) / 6 * tension;
-      const cp1y = p1.y + (p2.y - p0.y) / 6 * tension;
-      const cp2x = p2.x - (p3.x - p1.x) / 6 * tension;
-      const cp2y = p2.y - (p3.y - p1.y) / 6 * tension;
-      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
-    }
-  }
-  ctx.stroke();
-}
-
-/* Trace REC */
-function drawRec(tNow){
-  const w=canvasRec.width, h=canvasRec.height, left=60,right=20,drawW=w-left-right;
-  const t0 = Math.max(0, tNow - VISIBLE_WINDOW);
-  const baseSec = Math.floor(t0);
-  if(baseSec !== lastBaseT0Sec){ drawBaseRec(t0); lastBaseT0Sec = baseSec; }
-  ctxRec.clearRect(0,0,w,h); ctxRec.drawImage(baseRec, 0, 0);
-
-  const pts = recordedPitch.filter(p => p.t >= t0);
-  if(pts.length===0) return;
-
-  const curvePoints = pts.map(p => ({
-    x: left + ((p.t - t0)/VISIBLE_WINDOW) * drawW,
-    y: mapPitchToY(p.hz, h)
-  }));
-
-  ctxRec.strokeStyle = getComputedStyle(document.body).getPropertyValue('--blue').trim() || '#3b82f6';
-  ctxRec.lineWidth = 3.5; ctxRec.lineJoin='round'; ctxRec.lineCap='round';
-  drawSmoothCurve(ctxRec, curvePoints, 0.5);
-
-  ctxRec.fillStyle = '#3b82f6';
-  for(const pt of curvePoints){ ctxRec.beginPath(); ctxRec.arc(pt.x, pt.y, 1.5, 0, Math.PI*2); ctxRec.fill(); }
-}
-
-/* Trace REF */
-function drawReference(){
-  const w=canvasRef.width, h=canvasRef.height, left=60,right=20,drawW=w-left-right;
-  ctxRef.clearRect(0,0,w,h); ctxRef.drawImage(baseRef,0,0);
-  if(refData.pitch.length===0) return;
-
-  const curvePoints = refData.pitch.map(p => ({
-    x: left + (p.t / Math.max(refData.duration,1)) * drawW,
-    y: mapPitchToY(p.hz, h)
-  }));
-
-  ctxRef.strokeStyle = getComputedStyle(document.body).getPropertyValue('--violet').trim() || '#a78bfa';
-  ctxRef.lineWidth = 3.5; ctxRef.lineJoin='round'; ctxRef.lineCap='round';
-  drawSmoothCurve(ctxRef, curvePoints, 0.5);
-
-  ctxRef.fillStyle = '#a78bfa';
-  for(const pt of curvePoints){ ctxRef.beginPath(); ctxRef.arc(pt.x, pt.y, 1.5, 0, Math.PI*2); ctxRef.fill(); }
-}
-
-/* ---------------- Audio init ---------------- */
-async function ensureAudio(){
-  if(!audioCtx){
-    audioCtx = new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
-    log('INFO','AudioContext créé');
-  }
-  if(audioCtx.state==='suspended'){ await audioCtx.resume(); log('INFO','AudioContext repris'); }
-}
-
-async function activateMic(){
-  try{
-    await ensureAudio();
-    if(!micStream){
-      micStream = await navigator.mediaDevices.getUserMedia({
-        audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false }
-      });
-      log('INFO','Microphone autorisé');
-    }
-    if(!analyser){
-      const src = audioCtx.createMediaStreamSource(micStream);
-      analyser = audioCtx.createAnalyser();
-      analyser.fftSize = DETECT_SIZE;
-      analyser.smoothingTimeConstant = 0;
-      src.connect(analyser);
-      log('INFO','Analyser connecté ('+DETECT_SIZE+')');
-    }
-    btnMic.disabled = true; btnRecStart.disabled = false;
-
-    if(!detector){
-      detector = new YinDetector(audioCtx.sampleRate, DETECT_SIZE);
-      detector.threshold = 0.06; // stable voix
-      pitchyStatus.textContent='Détecteur: OK'; pitchyStatus.className='badge ok';
-      log('INFO','YIN initialisé (seuil 0.06)');
-    }
-    if(!smoother){
-      smoother = new PitchSmoother({ medianWindowSize:5, smoothingFactor:0.75, maxPitchJump:250, minConfidence:0.0 });
-      log('INFO','PitchSmoother initialisé');
-    }
-
-    recStart = audioCtx.currentTime;
-    monitorOn = true;
-    startMonitor();
-  }catch(e){ log('ERROR','Mic: '+e.message); }
-}
-
-/* ---------------- Recording ---------------- */
-function startRecording(){
-  try{
-    if(!micStream) return log('WARN','Active d’abord le micro');
-    chunks=[]; lastBlob=null; recordedPitch=[];
-    recordDetectionCount=0; recordDetectionRawCount=0;
-    btnDownWebM.disabled=btnDownWAV.disabled=btnDownMP3.disabled=true;
-
-    recStart = audioCtx.currentTime;
-    mediaRecorder = new MediaRecorder(micStream, {mimeType:'audio/webm;codecs=opus', audioBitsPerSecond:128000});
-    mediaRecorder.ondataavailable = e=>{ if(e.data && e.data.size>0) chunks.push(e.data); };
-    mediaRecorder.onstop = ()=>{
-      if(chunks.length>0){ lastBlob = new Blob(chunks, {type: chunks[0].type || 'audio/webm'}); log('INFO','Enregistrement terminé'); btnDownWebM.disabled=btnDownWAV.disabled=btnDownMP3.disabled=false; }
-    };
-
-    mediaRecorder.start(100);
-    btnRecStart.disabled=true; btnRecStop.disabled=false;
-
-    if(timerInterval) clearInterval(timerInterval);
-    timerInterval=setInterval(()=>{ updateTimer(audioCtx.currentTime - recStart); }, 100);
-
-    monitorOn=true;
-    log('INFO','Enregistrement démarré');
-  }catch(e){ log('ERROR','startRecording: '+e.message); }
-}
-function stopRecording(){
-  try{
-    if(mediaRecorder && mediaRecorder.state==='recording'){ mediaRecorder.stop(); }
-    btnRecStart.disabled=false; btnRecStop.disabled=true;
-    clearInterval(timerInterval); updateTimer(0);
-    monitorOn=false;
-  }catch(e){ log('ERROR','stopRecording: '+e.message); }
-}
-
-/* ---------------- Live monitor ---------------- */
-let anaBuf = null, rafTick = null;
-function startMonitor(){
-  if(!detector || !analyser) return;
-  if(rafTick) return;
-  anaBuf = new Float32Array(DETECT_SIZE);
-
-  const tick = ()=>{
-    try{
-      analyser.getFloatTimeDomainData(anaBuf);
-      const hzRaw = detector.detect(anaBuf); // ← avec YIN corrigé
-      if(hzRaw && hzRaw>=MIN_HZ && hzRaw<=MAX_HZ){
-        recordDetectionRawCount++;
-        const hz = smoother ? smoother.smooth(hzRaw, detector.probability) : hzRaw;
-        if(hz && hz>0){
-          const t = audioCtx.currentTime - recStart;
-          recordedPitch.push({t, hz});
-          recordDetectionCount++;
-          // fenêtre glissante
-          const t0 = Math.max(0, t - VISIBLE_WINDOW - 0.5);
-          while(recordedPitch.length && recordedPitch[0].t < t0){ recordedPitch.shift(); }
-        }
-      }
-    }catch(e){ console.error('Pitch detection error:', e); }
-
-    const now = audioCtx.currentTime - recStart;
-    const needBaseRefresh = (Date.now() % REFRESH_BASE_EVERY_MS) < 16;
-    if(needBaseRefresh || Math.floor(Math.max(0, now - VISIBLE_WINDOW)) !== lastBaseT0Sec){
-      drawBaseRec(Math.max(0, now - VISIBLE_WINDOW));
-    }
-    drawRec(now);
-    debugRec.textContent = `Détections brutes: ${recordDetectionRawCount} | Points lissés: ${recordDetectionCount}`;
-
-    if(monitorOn || (mediaRecorder && mediaRecorder.state==='recording')){
-      rafTick = requestAnimationFrame(tick);
-    }else{
-      rafTick = null;
-    }
-  };
-
-  drawBaseRec(0);
-  rafTick = requestAnimationFrame(tick);
-}
-
-/* ---------------- Exports ---------------- */
-function downloadBlob(blob,name){
-  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-  log('INFO',`Téléchargé: ${name}`);
-}
-btnDownWebM.onclick = ()=>{ if(!lastBlob) return log('WARN','Aucun enregistrement'); downloadBlob(lastBlob,'take.webm'); };
-btnDownWAV.onclick = async ()=>{
-  try{
-    if(!lastBlob) return log('WARN','Aucun enregistrement');
-    if(!window.WAVExport) return log('ERROR','WAVExport indisponible');
-    const wav = await WAVExport.fromWebM(lastBlob); if(!wav) return log('ERROR','Conversion WAV échouée');
-    downloadBlob(wav,'take.wav');
-  }catch(e){ log('ERROR','WAV download: '+e.message); }
-};
-btnDownMP3.onclick = async ()=>{
-  try{
-    if(!lastBlob) return log('WARN','Aucun enregistrement');
-    if(!window.WAVExport || !window.MP3Export) return log('ERROR','MP3Export indisponible');
-    const wav = await WAVExport.fromWebM(lastBlob); if(!wav) return log('ERROR','Conversion WAV échouée');
-    log('INFO','Encodage MP3 en cours…'); const mp3 = await MP3Export.fromWav(wav); if(!mp3) return log('ERROR','Conversion MP3 échouée');
-    downloadBlob(mp3,'take.mp3');
-  }catch(e){ log('ERROR','MP3 download: '+e.message); }
-};
-btnClearRec.onclick = ()=>{
-  chunks=[]; lastBlob=null; recordedPitch=[]; recordDetectionCount=0; recordDetectionRawCount=0;
-  drawBaseRec(0); ctxRec.clearRect(0,0,canvasRec.width,canvasRec.height); ctxRec.drawImage(baseRec,0,0);
-  debugRec.textContent='Détections brutes: 0 | Points lissés: 0';
-  btnDownWebM.disabled=btnDownWAV.disabled=btnDownMP3.disabled=true;
-  log('INFO','Enregistrement effacé');
-};
-
-/* ---------------- Uploads ---------------- */
-fileUploadRec.addEventListener('change', async e=>{
-  try{
-    const file=e.target.files[0]; if(!file) return;
-    await ensureAudio(); const buf=await file.arrayBuffer();
-    lastBlob = new Blob([buf], {type:file.type}); chunks=[lastBlob];
-    btnDownWebM.disabled=btnDownWAV.disabled=btnDownMP3.disabled=false;
-    log('INFO',`Fichier chargé: ${file.name}`);
-  }catch(err){ log('ERROR','Upload rec: '+err.message); }
-});
-
-fileUploadRef.addEventListener('change', async e=>{
-  try{
-    const file=e.target.files[0]; if(!file) return;
-    await ensureAudio(); const buf=await file.arrayBuffer();
-    const audio=await audioCtx.decodeAudioData(buf); const ch=audio.getChannelData(0);
-    refData.duration = audio.duration; refDetectionCount=0;
-    if(smoother && smoother.reset) smoother.reset();
-
-    const result=[]; const win=DETECT_SIZE, hop=win>>1; let raw=0, kept=0;
-    const localDetector = new YinDetector(audioCtx.sampleRate, DETECT_SIZE);
-    localDetector.threshold = detector ? detector.threshold : 0.06;
-
-    for(let i=0; i+win<=ch.length; i+=hop){
-      const slice = ch.subarray(i,i+win);
-      const hzRaw = localDetector.detect(slice);
-      if(hzRaw && hzRaw>=MIN_HZ && hzRaw<=MAX_HZ){
-        raw++;
-        const sm = smoother ? smoother.smooth(hzRaw, localDetector.probability) : hzRaw;
-        if(sm && sm>0){ kept++; result.push({t:i/audio.sampleRate, hz: sm}); }
-      }
-    }
-    refDetectionCount = kept; refData.pitch = result;
-    drawBaseRef(refData.duration); drawReference();
-    debugRef.textContent = `Détections brutes: ${raw} | Points lissés: ${kept}`;
-    log('INFO',`Référence chargée: ${file.name} (${audio.duration.toFixed(1)}s, ${result.length} points)`);
-  }catch(err){ log('ERROR','Upload ref: '+err.message); }
-});
-btnClearRef.onclick = ()=>{
-  refData={pitch:[],duration:0}; refDetectionCount=0; drawBaseRef(1); ctxRef.clearRect(0,0,canvasRef.width,canvasRef.height); ctxRef.drawImage(baseRef,0,0);
-  debugRef.textContent='Détections brutes: 0 | Points lissés: 0'; mAvg.textContent='—'; mMax.textContent='—'; mInTune.textContent='—';
-  log('INFO','Référence effacée');
-};
-
-/* ---------------- Events ---------------- */
-btnMic.onclick = ()=> activateMic();
-btnRecStart.onclick = ()=> startRecording();
-btnRecStop.onclick = ()=> stopRecording();
-btnMonOff.onclick = ()=>{ monitorOn=false; };
-btnMonOn.onclick  = ()=>{ monitorOn=true; if(audioCtx) startMonitor(); };
-
-btnScaleAbs.onclick = ()=>{
-  scaleMode='abs';
-  btnScaleAbs.classList.add('active');
-  btnMode440.classList.remove('active');
-  btnModeAuto.classList.remove('active');
-};
-btnMode440.onclick = ()=>{
-  scaleMode='a440';
-  btnMode440.classList.add('active');
-  btnScaleAbs.classList.remove('active');
-  btnModeAuto.classList.remove('active');
-};
-btnModeAuto.onclick = ()=>{
-  scaleMode='auto';
-  btnModeAuto.classList.add('active');
-  btnScaleAbs.classList.remove('active');
-  btnMode440.classList.remove('active');
-};
-
-drawBaseRec(0); ctxRec.drawImage(baseRec,0,0); drawBaseRef(1); ctxRef.drawImage(baseRef,0,0);
-log('INFO','Interface prête — Live 30s, échelle ABS, fenêtre 2048');
-</script>
+  <!-- Modules projet (ordre important) -->
+  <script src="./assets/js/pitch/yin-detector.js"></script>
+  <!-- (Optionnel) si tu as un smoother dédié : <script src="./assets/js/pitch/pitch-smoothing.js"></script> -->
+  <script src="./assets/js/draw.js"></script>
+  <script src="./assets/js/audio-engine.js"></script>
+  <script src="./assets/js/app.js"></script>
 </body>
 </html>

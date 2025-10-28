@@ -1,54 +1,50 @@
 <!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="utf-8"/>
-  <title>Test Audio Core — Pitch Detection + Recording</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <style>
-    :root{--bg:#0b1220;--panel:#0e1729;--card:#111a2e;--grid:#1a2642;--text:#e5e7eb;--muted:#9ca3af;--ok:#10b981;--err:#ef4444;}
-    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
-    .wrap{max-width:1200px;margin:20px auto;padding:0 16px}
-    .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
-    .btn{border:1px solid #1f2a44;background:var(--card);color:var(--text);border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:600}
-    .btn.active{background:#16213a;color:#22c55e}
-    .badge{padding:6px 10px;border-radius:6px;border:1px solid #234;color:#bbf7d0;background:#052216}
-    .badge.err{color:#fecaca;border-color:#4a171f;background:#2a0f14}
-    .panel{background:var(--panel);border:1px solid #1f2a44;border-radius:12px;padding:16px}
-    .canvasWrap{border:1px solid #1f2a44;border-radius:8px;padding:4px;background:#0b1324;margin:8px 0}
-    canvas{display:block;width:100%;height:auto;background:#0b1324}
-    .log{background:#0b1020;border:1px solid #1f2a44;border-radius:8px;padding:12px;color:#dbeafe;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;max-height:220px;overflow:auto;white-space:pre-wrap}
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test Audio Core — Enregistrement + Détection Pitch (LISSÉE)</title>
+<style>
+:root{
+  --bg:#0b1220;--panel:#0e1729;--card:#111a2e;--grid:#1a2642;
+  --text:#e5e7eb;--muted:#9ca3af;--ok:#10b981;--err:#ef4444;--blue:#3b82f6;
+}
+*{box-sizing:border-box} html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
+.wrap{max-width:1100px;margin:24px auto;padding:0 16px}
+.h1{font-weight:800;font-size:20px;margin:0 0 16px}
+.bar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;border:1px solid #1f2a44;background:var(--card);color:var(--text);border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:13px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.badge{padding:6px 10px;border-radius:8px;border:1px solid #22304f;background:#0b1220;font-size:12px}
+.badge.ok{color:#bbf7d0;border-color:#206a44;background:#052216}
+.badge.err{color:#fecaca;border-color:#4a171f;background:#2a0f14}
+.canvasWrap{border:1px solid #1f2a44;border-radius:10px;background:#0b1324;padding:6px}
+canvas{display:block;width:100%;height:auto}
+.log{background:#0b1020;border:1px solid #1f2a44;border-radius:8px;padding:12px;color:#dbeafe;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;max-height:240px;overflow:auto;white-space:pre-wrap}
+</style>
 </head>
 <body>
-  <div class="wrap">
-    <div style="font-weight:800;font-size:20px;margin:0 0 12px">🎵 Test Audio Core — Enregistrement + Détection Pitch (LISSÉE)</div>
-
-    <div class="bar">
-      <button id="btnMic" class="btn">🎤 Activer micro</button>
-      <button id="btnRec" class="btn">▶ Enregistrer</button>
-      <button id="btnStop" class="btn">⏹ Stop</button>
-      <span id="badge" class="badge">Détecteur: chargement…</span>
-      <span style="margin-left:auto"></span>
-      <button id="btnAbs"  class="btn active">Absolu</button>
-      <button id="btnA440" class="btn">A440</button>
-      <button id="btnAuto" class="btn">Auto</button>
-    </div>
-
-    <div class="panel">
-      <div class="canvasWrap"><canvas id="canvasRec" width="900" height="380"></canvas></div>
-    </div>
-
-    <div style="margin:12px 0 6px">Logs</div>
-    <div id="logBox" class="log">Démarrage…</div>
+<div class="wrap">
+  <div class="h1">🎵 Test Audio Core — Enregistrement + Détection Pitch (LISSÉE)</div>
+  <div class="bar">
+    <button id="btnMic" class="btn">🎤 Activer micro</button>
+    <button id="btnRec" class="btn" disabled>▶ Enregistrer</button>
+    <button id="btnStop" class="btn" disabled>⏹ Stop</button>
+    <span id="badge" class="badge">Détecteur: chargement…</span>
   </div>
 
-  <!-- libs d'abord -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+  <div class="canvasWrap">
+    <canvas id="cv" width="900" height="360"></canvas>
+  </div>
 
-  <!-- nos scripts (chemins EXACTS) -->
-  <script src="./assets/vendor/yin-detector.js"></script>
-  <script src="./assets/js/pitch-smoothing.js"></script>
-  <script src="./assets/js/draw.js"></script>
-  <script src="./assets/js/audio-engine.js"></script>
+  <h3>Logs</h3>
+  <div id="log" class="log">Démarrage…</div>
+</div>
+
+<!-- ⚠️ CHARGER depuis src/ (source unique), PAS depuis assets/ -->
+<script src="./src/vendor/yin-detector.js"></script>
+<script src="./src/utils/pitch-smoothing.js"></script>
+<script src="./src/app.js"></script>
 </body>
 </html>

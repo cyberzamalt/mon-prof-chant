@@ -1,6 +1,6 @@
-<script>
 /*!
  * draw.js — fond + mappage + courbe lisse (Catmull-Rom→Bezier)
+ * (FICHIER JS PUR — PAS DE <script> DEDANS)
  */
 (function(){
   const Y_RANGE_CENTS = 200;
@@ -8,6 +8,13 @@
   function hzToMidi(hz){ return 69 + 12 * Math.log2(hz/440); }
   function midiToHz(m){ return 440 * Math.pow(2, (m-69)/12); }
   function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+
+  function centsFrom(hz, mode){
+    if (mode==='a440') return 1200*Math.log2(hz/440);
+    const midi = Math.round(hzToMidi(hz));
+    const base = midiToHz(midi);
+    return 1200*Math.log2(hz/base);
+  }
 
   function mapCentsToY(cents, h){
     const H = h - 80, mid = h/2, pxPerCent = H/(2*Y_RANGE_CENTS);
@@ -17,12 +24,6 @@
     const top=20, bot=h-60;
     const n = (midi - minMidi) / (maxMidi - minMidi);
     return bot - clamp(n,0,1)*(bot-top);
-  }
-  function centsFrom(hz, mode){
-    if (mode==='a440') return 1200*Math.log2(hz/440);
-    const midi = Math.round(hzToMidi(hz));
-    const base = midiToHz(midi);
-    return 1200*Math.log2(hz/base);
   }
   function mapPitchToY(hz, h, mode, minMidi, maxMidi){
     if (mode==='abs') return mapMidiToY(hzToMidi(hz), h, minMidi, maxMidi);
@@ -86,4 +87,3 @@
     Y_RANGE_CENTS, hzToMidi, mapPitchToY, drawBase, drawSmooth, clamp
   };
 })();
-</script>

@@ -1,16 +1,6 @@
 /**
  * AudioEngine.js
  * TYPE: Singleton - Core Audio Engine
- * 
- * Responsabilités:
- * - Gestion singleton AudioContext
- * - Orchestration lifecycle audio
- * - Point d'entrée unique pour audio
- * - Création nodes et connections
- * - Gestion erreurs et fallbacks
- * 
- * Dépendances: Logger, AudioContextManager, BrowserDetector
- * Utilisé par: TOUS les modules audio
  */
 
 import { Logger } from '../../logging/Logger.js';
@@ -28,9 +18,6 @@ class AudioEngine {
   };
   #state = 'uninitialized';
 
-  /**
-   * Obtenir l'instance singleton
-   */
   static getInstance() {
     try {
       if (!AudioEngine.#instance) {
@@ -44,9 +31,6 @@ class AudioEngine {
     }
   }
 
-  /**
-   * Constructeur privé
-   */
   constructor() {
     try {
       Logger.info('AudioEngine', 'Constructor called');
@@ -57,9 +41,6 @@ class AudioEngine {
     }
   }
 
-  /**
-   * Initialiser l'AudioEngine (doit être appelé après user gesture)
-   */
   async initialize(options = {}) {
     try {
       Logger.info('AudioEngine', 'Initialization starting', options);
@@ -69,18 +50,13 @@ class AudioEngine {
         return true;
       }
 
-      // Merge config
       this.#config = { ...this.#config, ...options };
 
-      // Détection navigateur
       const browser = BrowserDetector.detect();
       Logger.info('AudioEngine', 'Browser detected', browser);
 
-      // Créer AudioContext
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextClass) {
-        throw new Error('Web Audio API not supported');
-      }
+      if (!AudioContextClass) throw new Error('Web Audio API not supported');
 
       this.#audioContext = new AudioContextClass({
         sampleRate: this.#config.sampleRate,
@@ -93,22 +69,17 @@ class AudioEngine {
         baseLatency: this.#audioContext.baseLatency,
       });
 
-      // Manager
       this.#contextManager = new AudioContextManager(this.#audioContext);
 
-      // Résumer si suspendu
       if (this.#audioContext.state === 'suspended') {
         Logger.info('AudioEngine', 'Context suspended, attempting resume');
         const resumed = await this.#contextManager.resume();
-        if (!resumed) {
-          Logger.warn('AudioEngine', 'Could not resume context - may need user gesture');
-        }
+        if (!resumed) Logger.warn('AudioEngine', 'Could not resume context - need user gesture');
       }
 
       this.#state = 'initialized';
       Logger.info('AudioEngine', 'Initialization complete');
 
-      // Stocker infos globales
       window.__audioEngineState = {
         initialized: true,
         sampleRate: this.#audioContext.sampleRate,
@@ -124,14 +95,9 @@ class AudioEngine {
     }
   }
 
-  /**
-   * Obtenir le contexte audio
-   */
   getContext() {
     try {
-      if (!this.#audioContext) {
-        throw new Error('AudioContext not initialized');
-      }
+      if (!this.#audioContext) throw new Error('AudioContext not initialized');
       return this.#audioContext;
     } catch (err) {
       Logger.error('AudioEngine', 'getContext failed', err);
@@ -139,109 +105,37 @@ class AudioEngine {
     }
   }
 
-  /**
-   * Obtenir le manager
-   */
   getContextManager() {
-    try {
-      return this.#contextManager;
-    } catch (err) {
-      Logger.error('AudioEngine', 'getContextManager failed', err);
-      return null;
-    }
+    try { return this.#contextManager; }
+    catch (err) { Logger.error('AudioEngine', 'getContextManager failed', err); return null; }
   }
 
-  /**
-   * Obtenir sample rate
-   */
   getSampleRate() {
-    try {
-      return this.#audioContext?.sampleRate || this.#config.sampleRate;
-    } catch (err) {
-      Logger.error('AudioEngine', 'getSampleRate failed', err);
-      return this.#config.sampleRate;
-    }
+    try { return this.#audioContext?.sampleRate || this.#config.sampleRate; }
+    catch (err) { Logger.error('AudioEngine', 'getSampleRate failed', err); return this.#config.sampleRate; }
   }
 
-  /**
-   * Alias pour getContext() - compatibilité PitchDetector
-   */
-  ctx() {
-    try {
-      return this.getContext();
-    } catch (err) {
-      Logger.error('AudioEngine', 'ctx failed', err);
-      return null;
-    }
-  }
-
-  /**
-   * Obtenir le temps courant en secondes - compatibilité PitchDetector
-   */
+  ctx() { return this.getContext(); }
   currentTime() {
-    try {
-      if (!this.#audioContext) {
-        Logger.warn('AudioEngine', 'currentTime: AudioContext not initialized');
-        return 0;
-      }
-      return this.#audioContext.currentTime;
-    } catch (err) {
-      Logger.error('AudioEngine', 'currentTime failed', err);
-      return 0;
-    }
+    try { return this.#audioContext ? this.#audioContext.currentTime : 0; }
+    catch (err) { Logger.error('AudioEngine', 'currentTime failed', err); return 0; }
   }
+  sampleRate() { return this.getSampleRate(); }
 
-  /**
-   * Alias pour getSampleRate() - compatibilité PitchDetector
-   */
-  sampleRate() {
-    try {
-      return this.getSampleRate();
-    } catch (err) {
-      Logger.error('AudioEngine', 'sampleRate failed', err);
-      return this.#config.sampleRate;
-    }
-  }
-
-  /**
-   * Obtenir état
-   */
   getState() {
-    try {
-      return this.#audioContext?.state || this.#state;
-    } catch (err) {
-      Logger.error('AudioEngine', 'getState failed', err);
-      return 'unknown';
-    }
+    try { return this.#audioContext?.state || this.#state; }
+    catch (err) { Logger.error('AudioEngine', 'getState failed', err); return 'unknown'; }
   }
 
-  /**
-   * Vérifier si initialisé
-   */
-  isInitialized() {
-    return this.#state === 'initialized' && this.#audioContext !== null;
-  }
-
-  /**
-   * Vérifier si running
-   */
+  isInitialized() { return this.#state === 'initialized' && this.#audioContext !== null; }
   isRunning() {
-    try {
-      return this.#audioContext?.state === 'running';
-    } catch (err) {
-      Logger.error('AudioEngine', 'isRunning check failed', err);
-      return false;
-    }
+    try { return this.#audioContext?.state === 'running'; }
+    catch (err) { Logger.error('AudioEngine', 'isRunning check failed', err); return false; }
   }
 
-  /**
-   * Créer un analyser node
-   */
   createAnalyser(fftSize = 2048) {
     try {
-      if (!this.#audioContext) {
-        throw new Error('AudioContext not initialized');
-      }
+      if (!this.#audioContext) throw new Error('AudioContext not initialized');
       const analyser = this.#audioContext.createAnalyser();
       analyser.fftSize = fftSize;
       Logger.info('AudioEngine', 'Analyser created', { fftSize });
@@ -252,14 +146,9 @@ class AudioEngine {
     }
   }
 
-  /**
-   * Créer un gain node
-   */
   createGain() {
     try {
-      if (!this.#audioContext) {
-        throw new Error('AudioContext not initialized');
-      }
+      if (!this.#audioContext) throw new Error('AudioContext not initialized');
       const gain = this.#audioContext.createGain();
       Logger.debug('AudioEngine', 'Gain node created');
       return gain;
@@ -269,14 +158,9 @@ class AudioEngine {
     }
   }
 
-  /**
-   * Créer un destination (speakers)
-   */
   getDestination() {
     try {
-      if (!this.#audioContext) {
-        throw new Error('AudioContext not initialized');
-      }
+      if (!this.#audioContext) throw new Error('AudioContext not initialized');
       return this.#audioContext.destination;
     } catch (err) {
       Logger.error('AudioEngine', 'getDestination failed', err);
@@ -284,14 +168,9 @@ class AudioEngine {
     }
   }
 
-  /**
-   * Résumer le contexte
-   */
   async resume() {
     try {
-      if (!this.#contextManager) {
-        throw new Error('Context manager not initialized');
-      }
+      if (!this.#contextManager) throw new Error('Context manager not initialized');
       return await this.#contextManager.resume();
     } catch (err) {
       Logger.error('AudioEngine', 'resume failed', err);
@@ -299,9 +178,6 @@ class AudioEngine {
     }
   }
 
-  /**
-   * Obtenir rapport diagnostic
-   */
   getDiagnostics() {
     try {
       return {

@@ -32,7 +32,7 @@
   let rafId = 0;
 
   // rendu
-  const points = []; // {t, cents|midi}
+  const points = []; // {t, hz}
   const VISIBLE = 30; // s
   const MIN_HZ = 60, MAX_HZ = 1200;
   const DETECT_SIZE = 2048;
@@ -42,11 +42,12 @@
 
   // ------- Helpers -------
   const hzToMidi = (hz) => 69 + 12 * Math.log2(hz / 440);
+  const midiToHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
   const clamp = (v, a, b) => v < a ? a : (v > b ? b : v);
   function centsFrom(hz, mode){
     if (mode === "a440") return 1200 * Math.log2(hz / 440);
     const midi = Math.round(hzToMidi(hz));
-    const baseHz = 440 * Math.pow(2, (midi - 69) / 12);
+    const baseHz = midiToHz(midi);
     return 1200 * Math.log2(hz / baseHz);
   }
   function mapPitchToY(hz, h){
@@ -72,7 +73,7 @@
     b.clearRect(0,0,w,h);
     b.fillStyle="#0b1324"; b.fillRect(0,0,w,h);
 
-    // lignes
+    // lignes horizontales
     b.strokeStyle="#1a2642"; b.lineWidth=0.5;
     for (let i=0;i<6;i++){ const y=(h-40)/5*i+20; b.beginPath(); b.moveTo(0,y); b.lineTo(w,y); b.stroke(); }
     // ligne centrale
@@ -115,7 +116,7 @@
     const vis = points.filter(p=>p.t>=t0);
     if (!vis.length) return;
 
-    // courbe lisse
+    // courbe
     ctx.strokeStyle=getComputedStyle(document.body).getPropertyValue('--blue').trim()||'#3b82f6';
     ctx.lineWidth=3; ctx.lineJoin='round'; ctx.lineCap='round';
     ctx.beginPath();

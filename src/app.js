@@ -31,6 +31,15 @@
   let smoother = null;
   let rafId = 0;
 
+  // DSP
+  let hpf = null;
+  let gate = null;
+
+  // buffers réutilisés (pas d’alloc en boucle)
+  let bufRaw = null;
+  let bufHPF = null;
+  let bufGate = null;
+
   // rendu
   const points = []; // {t, hz}
   const VISIBLE = 30; // s
@@ -42,12 +51,11 @@
 
   // ------- Helpers -------
   const hzToMidi = (hz) => 69 + 12 * Math.log2(hz / 440);
-  const midiToHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
   const clamp = (v, a, b) => v < a ? a : (v > b ? b : v);
   function centsFrom(hz, mode){
     if (mode === "a440") return 1200 * Math.log2(hz / 440);
     const midi = Math.round(hzToMidi(hz));
-    const baseHz = midiToHz(midi);
+    const baseHz = 440 * Math.pow(2, (midi - 69) / 12);
     return 1200 * Math.log2(hz / baseHz);
   }
   function mapPitchToY(hz, h){
@@ -73,7 +81,7 @@
     b.clearRect(0,0,w,h);
     b.fillStyle="#0b1324"; b.fillRect(0,0,w,h);
 
-    // lignes horizontales
+    // lignes
     b.strokeStyle="#1a2642"; b.lineWidth=0.5;
     for (let i=0;i<6;i++){ const y=(h-40)/5*i+20; b.beginPath(); b.moveTo(0,y); b.lineTo(w,y); b.stroke(); }
     // ligne centrale
@@ -116,7 +124,7 @@
     const vis = points.filter(p=>p.t>=t0);
     if (!vis.length) return;
 
-    // courbe
+    // courbe lisse
     ctx.strokeStyle=getComputedStyle(document.body).getPropertyValue('--blue').trim()||'#3b82f6';
     ctx.lineWidth=3; ctx.lineJoin='round'; ctx.lineCap='round';
     ctx.beginPath();
@@ -157,12 +165,26 @@
       detector.threshold = 0.06;
       smoother = new PitchSmoother({ medianWindowSize:5, smoothingFactor:0.76, maxPitchJump:250 });
 
+      // DSP: HPF + NoiseGate
+      if (typeof BiquadHPF !== "undefined") {
+        hpf = new BiquadHPF(audioCtx.sampleRate, 80, Math.SQRT1_2);
+      }
+      if (typeof NoiseGate !== "undefined") {
+        gate = new NoiseGate(audioCtx.sampleRate, { thresholdDb: -50, reductionDb: -80, attackMs: 5, releaseMs: 50, holdMs: 30 });
+      }
+
+      // buffers de travail
+      bufRaw  = new Float32Array(DETECT_SIZE);
+      bufHPF  = new Float32Array(DETECT_SIZE);
+      bufGate = new Float32Array(DETECT_SIZE);
+
       badge.textContent = "Détecteur: OK";
       badge.className = "badge ok";
       btnRecStart.disabled = false;
 
       startMonitor();
       log("INFO","Micro OK, analyseur prêt ("+DETECT_SIZE+")");
+      if (hpf || gate) log("INFO", `DSP actif: ${hpf?'HPF80 ':''}${gate?'NoiseGate(-50dB)':''}`.trim());
     }catch(e){
       log("ERROR","activateMic: "+e.message);
       badge.textContent = "Détecteur: ERREUR";
@@ -173,12 +195,23 @@
   function startMonitor(){
     if (!detector || !analyser) return;
     if (rafId) cancelAnimationFrame(rafId);
-    const buf = new Float32Array(DETECT_SIZE);
     const t0 = audioCtx.currentTime;
 
     const loop = ()=>{
-      analyser.getFloatTimeDomainData(buf);
-      const hz = detector.detect(buf);
+      analyser.getFloatTimeDomainData(bufRaw);
+
+      let sig = bufRaw;
+
+      if (hpf) {
+        hpf.process(sig, bufHPF);
+        sig = bufHPF;
+      }
+      if (gate) {
+        gate.process(sig, bufGate);
+        sig = bufGate;
+      }
+
+      const hz = detector.detect(sig);
       if (hz && hz >= MIN_HZ && hz <= MAX_HZ) {
         const sm = smoother ? smoother.smooth(hz) : hz;
         if (sm) {
@@ -231,7 +264,7 @@
     if (typeof YinDetector === "undefined") {
       badge.textContent = "Détecteur: ERREUR (yin-detector.js non chargé)";
       badge.className = "badge err";
-      log("ERROR","YinDetector non défini → chemin de script invalide (404 = 'expected expression, got <')");
+      log("ERROR","YinDetector non défini → chemin de script invalide");
     } else {
       log("INFO","Interface prête — Live 30s, fenêtre 2048");
     }

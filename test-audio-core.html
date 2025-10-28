@@ -59,11 +59,19 @@
     <div id="logBox" class="log">Démarrage…</div>
   </div>
 
-  <!-- Librairies (ordre important) -->
+  <!-- ========= JS: ordre strict (tous existent dans ton repo) ========= -->
+
+  <!-- 1) Détecteur + lisseur -->
   <script src="./src/vendor/yin-detector.js" defer></script>
   <script src="./src/utils/pitch-smoothing.js" defer></script>
 
-  <!-- App (existant dans ton repo) -->
+  <!-- 2) DSP (pré-traitements utilisés par l'app) -->
+  <script src="./src/audio/dsp/hpf-biquad.js" defer></script>
+  <script src="./src/audio/dsp/noise-gate.js" defer></script>
+  <!-- Optionnel: inclure si présent -->
+  <script src="./src/audio/dsp/median-queue.js" defer></script>
+
+  <!-- 3) App principale (utilise tout ce qui est au-dessus) -->
   <script src="./src/app.js" defer></script>
 </body>
 </html>

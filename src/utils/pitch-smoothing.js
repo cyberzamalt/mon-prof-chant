@@ -1,59 +1,48 @@
-<script>
-// Smoother combiné médiane + EMA + garde-fou de saut en cents
-(function(root,factory){
-  root.PitchSmoother = factory();
-}(typeof self!=="undefined"?self:this,function(){
+// src/utils/pitch-smoothing.js
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) {
+    module.exports = factory();
+  } else {
+    root.PitchSmoother = factory();
+  }
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
 
-  function centsBetween(hzA, hzB){
-    if(!hzA || !hzB) return 0;
-    return 1200 * Math.log2(hzB / hzA);
+  class Ring {
+    constructor(n) { this.a = new Array(n).fill(0); this.n = n; this.i = 0; this.filled = 0; }
+    push(v){ this.a[this.i] = v; this.i = (this.i+1)%this.n; if(this.filled<this.n) this.filled++; }
+    values(){ return this.a.slice(0, this.filled); }
+    clear(){ this.i=0; this.filled=0; this.a.fill(0); }
   }
 
-  class PitchSmoother{
-    constructor(opts={}){
-      this.medianWindowSize = Math.max(3, (opts.medianWindowSize|0) || 5);
-      if (this.medianWindowSize % 2 === 0) this.medianWindowSize += 1;
-      this.smoothingFactor = (opts.smoothingFactor ?? 0.75);
-      this.maxPitchJump = (opts.maxPitchJump ?? 250);   // en cents
-      this.minConfidence = (opts.minConfidence ?? 0.2);
-
-      this._win = [];
-      this._ema = null;
-      this._lastHz = null;
+  class PitchSmoother {
+    constructor({ medianWindowSize=5, smoothingFactor=0.75, maxPitchJump=250, minConfidence=0.2 } = {}) {
+      this.win = new Ring(medianWindowSize);
+      this.alpha = smoothingFactor;
+      this.maxJump = maxPitchJump;
+      this.prev = 0;
     }
+    reset(){ this.win.clear(); this.prev = 0; }
 
-    reset(){
-      this._win.length = 0;
-      this._ema = null;
-      this._lastHz = null;
-    }
+    smooth(hz) {
+      if (!hz || hz <= 0 || !Number.isFinite(hz)) return null;
 
-    _median(arr){
-      const tmp = arr.slice().sort((a,b)=>a-b);
-      return tmp[(tmp.length-1)>>1];
-    }
-
-    smooth(hz){
-      if(!hz || !isFinite(hz)) return null;
-
-      // Garde-fou: gros saut -> on accepte mais on ré-initialise doucement
-      const jump = centsBetween(this._lastHz, hz);
-      if (this._lastHz && Math.abs(jump) > this.maxPitchJump) {
-        this._win.length = 0;
-        this._ema = null;
+      // Filtre outliers (sauts délirants)
+      if (this.prev && Math.abs(hz - this.prev) > this.maxJump) {
+        // ignore ce point mais ne casse pas la courbe
+        hz = this.prev;
       }
 
-      this._lastHz = hz;
-      this._win.push(hz);
-      if (this._win.length > this.medianWindowSize) this._win.shift();
-      const med = (this._win.length >= 3) ? this._median(this._win) : hz;
+      this.win.push(hz);
+      const vals = this.win.values().slice().sort((a,b)=>a-b);
+      const med = vals[Math.floor(vals.length/2)] || hz;
 
-      // EMA vers la médiane
-      this._ema = (this._ema==null) ? med : (this.smoothingFactor * this._ema + (1 - this.smoothingFactor) * med);
-      return this._ema;
+      // Lissage expo
+      const sm = this.prev ? this.alpha * med + (1 - this.alpha) * this.prev : med;
+      this.prev = sm;
+      return sm;
     }
   }
 
   return PitchSmoother;
-}));
-</script>
+});

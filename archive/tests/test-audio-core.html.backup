@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Test Audio Core — Enregistrement + Détection Pitch (LISSÉE)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --bg:#0b1220;--panel:#0e1729;--card:#111a2e;--grid:#1a2642;
+      --text:#e5e7eb;--muted:#9ca3af;--ok:#10b981;--err:#ef4444;
+      --blue:#3b82f6;--violet:#a78bfa
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0}
+    body{background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
+    .wrap{max-width:1200px;margin:22px auto;padding:0 16px}
+    .h1{font-weight:800;font-size:20px;margin:0 0 16px}
+    .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid #1f2a44;background:var(--card);color:var(--text);border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:13px;transition:.2s}
+    .btn:hover:not([disabled]){background:#16213a;border-color:#2a3a54}
+    .btn[disabled]{opacity:.45;cursor:not-allowed}
+    .seg{display:inline-flex;border:1px solid #22304f;background:var(--card);border-radius:8px;overflow:hidden}
+    .seg button{padding:8px 12px;border:0;background:transparent;color:var(--text);cursor:pointer;font-size:13px;font-weight:600}
+    .seg button.active{background:#16213a;color:#22c55e}
+    .panel{background:var(--panel);border:1px solid #1f2a44;border-radius:12px;padding:16px}
+    .canvasWrap{border:1px solid #1f2a44;border-radius:8px;padding:4px;background:#0b1324;margin:8px 0;position:relative}
+    canvas{display:block;width:100%;height:auto;background:#0b1324}
+    .log{background:#0b1020;border:1px solid #1f2a44;border-radius:8px;padding:12px;color:#dbeafe;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;max-height:220px;overflow-y:auto;white-space:pre-wrap}
+    .badge{display:inline-flex;gap:6px;align-items:center;border:1px solid #22304f;background:#0b1220;padding:4px 8px;border-radius:6px;font-size:12px}
+    .badge.ok{color:#bbf7d0;border-color:#206a44;background:#052216}
+    .badge.err{color:#fecaca;border-color:#4a171f;background:#2a0f14}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="h1">🎵 Test Audio Core — Enregistrement + Détection Pitch (LISSÉE)</div>
+
+    <div class="bar">
+      <button id="btnMic" class="btn">🎤 Activer micro</button>
+      <div class="seg">
+        <button id="btnRecStart" class="btn" disabled>▶ Enregistrer</button>
+        <button id="btnRecStop" class="btn" disabled>⏹ Stop</button>
+      </div>
+      <div class="seg">
+        <button id="btnScaleAbs"  class="btn active">Absolu</button>
+        <button id="btnMode440"   class="btn">A440</button>
+        <button id="btnModeAuto"  class="btn">Auto</button>
+      </div>
+      <span id="pitchyStatus" class="badge">Détecteur: chargement…</span>
+    </div>
+
+    <div class="panel">
+      <div class="canvasWrap">
+        <canvas id="canvasRec" width="900" height="360"></canvas>
+      </div>
+    </div>
+
+    <h3>Logs</h3>
+    <div id="logBox" class="log">Démarrage…</div>
+  </div>
+
+  <!-- ========= JS: ordre strict (tous existent dans ton repo) ========= -->
+
+  <!-- 1) Détecteur + lisseur -->
+  <script src="./src/vendor/yin-detector.js" defer></script>
+  <script src="./src/utils/pitch-smoothing.js" defer></script>
+
+  <!-- 2) DSP (pré-traitements utilisés par l'app) -->
+  <script src="./src/audio/dsp/hpf-biquad.js" defer></script>
+  <script src="./src/audio/dsp/noise-gate.js" defer></script>
+  <!-- Optionnel: inclure si présent -->
+  <script src="./src/audio/dsp/median-queue.js" defer></script>
+
+  <!-- 3) App principale (utilise tout ce qui est au-dessus) -->
+  <script src="./src/app.js" defer></script>
+</body>
+</html>

@@ -1,1 +1,562 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>Test Audio Core — Pitch Detection + Recording</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+:root{
+  --bg:#0b1220;--panel:#0e1729;--card:#111a2e;--grid:#1a2642;
+  --text:#e5e7eb;--muted:#9ca3af;--ok:#10b981;--err:#ef4444;
+  --blue:#3b82f6;--violet:#a78bfa
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
+.wrap{max-width:1400px;margin:20px auto;padding:0 16px}
+.h1{font-weight:800;font-size:20px;margin:0 0 16px}
+.h2{font-weight:700;font-size:14px;margin:0 0 8px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.btn{display:inline-flex;align-items:center;gap:8px;border:1px solid #1f2a44;background:var(--card);color:var(--text);border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:600;font-size:13px;transition:.2s}
+.btn:hover:not([disabled]){background:#16213a;border-color:#2a3a54}
+.btn[disabled]{opacity:.4;cursor:not-allowed}
+.seg{display:inline-flex;border:1px solid #22304f;background:var(--card);border-radius:8px;overflow:hidden}
+.seg button{padding:8px 12px;border:0;background:transparent;color:var(--text);cursor:pointer;font-size:13px;font-weight:600}
+.seg button.active{background:#16213a;color:#22c55e}
+.timer{padding:8px 12px;border:1px solid #22304f;border-radius:8px;background:var(--card);min-width:60px;text-align:center;font-weight:600;font-family:monospace}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+@media(max-width:1024px){.cols{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid #1f2a44;border-radius:12px;padding:16px}
+.canvasWrap{border:1px solid #1f2a44;border-radius:8px;padding:4px;background:#0b1324;margin:8px 0;position:relative}
+canvas{display:block;width:100%;height:auto;background:#0b1324}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.log{background:#0b1020;border:1px solid #1f2a44;border-radius:8px;padding:12px;color:#dbeafe;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;max-height:250px;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
+.badge{display:inline-flex;gap:6px;align-items:center;border:1px solid #22304f;background:#0b1220;padding:4px 8px;border-radius:6px;font-size:12px}
+.badge.ok{color:#bbf7d0;border-color:#206a44;background:#052216}
+.badge.err{color:#fecaca;border-color:#4a171f;background:#2a0f14}
+.hint{color:var(--muted);font-size:12px;margin:6px 0 8px}
+.right{margin-left:auto}
+input[type="file"]{padding:8px 12px;border:1px solid #22304f;border-radius:8px;background:#0f172a;color:#var(--text);font-size:13px}
+.metrics{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:12px}
+.metric{background:#0b1220;border:1px solid #22304f;border-radius:6px;padding:6px 10px}
+.debugInfo{background:#0b1020;border:1px solid #1f2a44;border-radius:6px;padding:6px 10px;font-size:11px;color:#cbd5e1;margin-top:8px}
+</style>
+</head>
+<body>
 
+<!-- Libs -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<script src="./src/vendor/yin-detector.js"></script>
+<script src="./src/utils/pitch-smoothing.js"></script>
+
+<div class="wrap">
+  <div class="h1">🎵 Test Audio Core — Enregistrement + Détection Pitch (LISSÉE)</div>
+
+  <div class="bar">
+    <button id="btnMic" class="btn">🎤 Activer micro</button>
+
+    <div class="seg">
+      <button id="btnRecStart" class="btn" disabled>▶ Enregistrer</button>
+      <button id="btnRecStop" class="btn" disabled>⏹ Stop</button>
+    </div>
+
+    <div class="timer" id="timerRec">00:00</div>
+
+    <div class="seg">
+      <button id="btnMonOff" class="btn">Moniteur OFF</button>
+      <button id="btnMonOn"  class="btn">Moniteur ON</button>
+    </div>
+
+    <!-- NEW: mode d’ancrage -->
+    <div class="seg">
+      <button id="btnMode440"  class="btn">A440</button>
+      <button id="btnModeAuto" class="btn active">Auto</button>
+    </div>
+
+    <span class="right badge" id="pitchyStatus">Détecteur: chargement…</span>
+  </div>
+
+  <div class="cols">
+    <div class="panel">
+      <p class="h2">🎙️ Ta prise (micro)</p>
+      <div class="hint">Courbe bleue lisse = pitch détecté (YIN 0.05). Échelle ±200 cents, centrée sur la note (mode Auto) ou sur 440 Hz (A440). Fenêtre visible : 30 s.</div>
+      <div class="canvasWrap">
+        <canvas id="canvasRec" width="600" height="320"></canvas>
+      </div>
+      <div class="debugInfo" id="debugRec">Détections brutes: 0 | Points lissés: 0</div>
+      <div class="controls">
+        <button id="btnDownWebM" class="btn" disabled>⬇️ WebM</button>
+        <button id="btnDownWAV" class="btn" disabled>🎧 WAV</button>
+        <button id="btnDownMP3" class="btn" disabled>🎵 MP3</button>
+        <button id="btnClearRec" class="btn">🗑️ Effacer</button>
+        <input type="file" id="fileUploadRec" accept="audio/*" class="btn" />
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="h2">🎼 Référence (comparaison)</p>
+      <div class="hint">Charge un MP3/WAV local pour comparer ta courbe.</div>
+      <div class="canvasWrap">
+        <canvas id="canvasRef" width="600" height="320"></canvas>
+      </div>
+      <div class="debugInfo" id="debugRef">Détections brutes: 0 | Points lissés: 0</div>
+      <div class="controls">
+        <input type="file" id="fileUploadRef" accept="audio/*" class="btn" />
+        <button id="btnClearRef" class="btn">🗑️ Effacer</button>
+      </div>
+      <div class="metrics" id="metricsRef">
+        <div class="metric">Écart moy: <b id="mAvg">—</b></div>
+        <div class="metric">Écart max: <b id="mMax">—</b></div>
+        <div class="metric">% juste: <b id="mInTune">—</b></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="h1">📋 Logs</div>
+  <div id="logBox" class="log">Démarrage…</div>
+</div>
+
+<script src="./src/utils/wav-export.js"></script>
+<script src="./src/utils/mp3-export.js"></script>
+
+<script>
+/* ---------------- Logger ---------------- */
+const logBox = document.getElementById('logBox');
+const log = (lvl,msg)=>{
+  const n=new Date(),h=String(n.getHours()).padStart(2,'0'),m=String(n.getMinutes()).padStart(2,'0'),s=String(n.getSeconds()).padStart(2,'0');
+  logBox.textContent += `[${h}:${m}:${s}] [${lvl}] ${msg}\n`;
+  logBox.scrollTop = logBox.scrollHeight;
+};
+
+/* ---------------- State ---------------- */
+let audioCtx=null, analyser=null, micStream=null, mediaRecorder=null;
+let chunks=[], lastBlob=null;
+let detector=null, smoother=null;
+let recordedPitch=[]; // {t,hz,cents}
+let recordDetectionCount=0, recordDetectionRawCount=0;
+let recStart=0, timerInterval=null, rafId=null, monitorOn=false;
+let refData={pitch:[],duration:0}; let refDetectionCount=0;
+
+/* Réglages “chirurgien” */
+const VISIBLE_WINDOW = 30;
+const Y_RANGE_CENTS = 200;
+const MIN_HZ = 60, MAX_HZ = 1200;
+const DETECT_SIZE = 1024;
+const REFRESH_BASE_EVERY_MS = 800;
+
+/* Mode d’ancrage de la hauteur (A440 / Auto) */
+let anchorMode = 'auto'; // 'auto' ou 'a440'
+
+/* DOM */
+const canvasRec=document.getElementById('canvasRec'), ctxRec=canvasRec.getContext('2d');
+const canvasRef=document.getElementById('canvasRef'), ctxRef=canvasRef.getContext('2d');
+const btnMic=document.getElementById('btnMic');
+const btnRecStart=document.getElementById('btnRecStart');
+const btnRecStop=document.getElementById('btnRecStop');
+const timerRec=document.getElementById('timerRec');
+const btnMonOff=document.getElementById('btnMonOff');
+const btnMonOn=document.getElementById('btnMonOn');
+const btnMode440=document.getElementById('btnMode440');
+const btnModeAuto=document.getElementById('btnModeAuto');
+const pitchyStatus=document.getElementById('pitchyStatus');
+const debugRec=document.getElementById('debugRec');
+const debugRef=document.getElementById('debugRef');
+const mAvg=document.getElementById('mAvg'), mMax=document.getElementById('mMax'), mInTune=document.getElementById('mInTune');
+const fileUploadRec=document.getElementById('fileUploadRec'), fileUploadRef=document.getElementById('fileUploadRef');
+const btnDownWebM=document.getElementById('btnDownWebM'), btnDownWAV=document.getElementById('btnDownWAV'), btnDownMP3=document.getElementById('btnDownMP3');
+const btnClearRec=document.getElementById('btnClearRec'), btnClearRef=document.getElementById('btnClearRef');
+
+/* Offscreen base caches (pour perf) */
+const baseRec = document.createElement('canvas'); baseRec.width=canvasRec.width; baseRec.height=canvasRec.height;
+const baseRef = document.createElement('canvas'); baseRef.width=canvasRef.width; baseRef.height=canvasRef.height;
+let lastBaseT0Sec = -1;
+
+/* ---------------- Helpers ---------------- */
+function fmtTime(secs){ const mm=String(Math.floor(secs/60)).padStart(2,'0'); const ss=String(Math.floor(secs%60)).padStart(2,'0'); return `${mm}:${ss}`; }
+function updateTimer(secs){ timerRec.textContent = fmtTime(secs); }
+function clamp(v,min,max){ return v<min?min:v>max?max:v; }
+
+/* Conversion Hz -> cents selon le mode choisi */
+function centsFrom(hz){
+  if (anchorMode === 'a440') {
+    return 1200 * Math.log2(hz / 440);
+  } else {
+    // Auto: cents entourant la note MIDI la plus proche
+    const midi = Math.round(69 + 12 * Math.log2(hz / 440));
+    const baseHz = 440 * Math.pow(2, (midi - 69) / 12);
+    return 1200 * Math.log2(hz / baseHz);
+  }
+}
+
+function mapCentsToY(cents,height){
+  const H = height - 80;
+  const pxPerCent = H / (2 * Y_RANGE_CENTS);
+  const mid = height/2;
+  return mid - (cents * pxPerCent);
+}
+
+/* Dessin de la base (grille + axes) pour REC */
+function drawBaseRec(t0){
+  const w=baseRec.width, h=baseRec.height; const ctx=baseRec.getContext('2d');
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle='#0b1324'; ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle='#1a2642'; ctx.lineWidth=0.5;
+  for(let i=0;i<5;i++){ const y=(h/4)*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+  ctx.strokeStyle='#10b981'; ctx.setLineDash([4,4]); ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(0,h/2); ctx.lineTo(w,h/2); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle='#9ca3af'; ctx.font='9px monospace'; ctx.textAlign='left';
+  const vocalLabels = [
+    {c:200 ,t:'🔝 Très très aigu'},{c:150,t:'Très aigu'},{c:100,t:'Aigu'},
+    {c: 50,t:'Moyen aigu'},{c:  0,t:'🎯 Milieu (juste)'},
+    {c:-50,t:'Moyen grave'},{c:-100,t:'Grave'},{c:-150,t:'Très grave'},{c:-200,t:'🔻 Très très grave'}
+  ];
+  for(const v of vocalLabels){
+    const y = mapCentsToY(v.c,h);
+    ctx.fillText(v.t,2,y+3);
+    ctx.strokeStyle='#2a3a54'; ctx.lineWidth=0.5;
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(58,y); ctx.stroke();
+  }
+  ctx.fillStyle='#9ca3af'; ctx.font='11px monospace'; ctx.textAlign='right';
+  ctx.fillText(`+${Y_RANGE_CENTS}c`,55,16); ctx.textAlign='left'; ctx.fillText(`-${Y_RANGE_CENTS}c`,65,16);
+  ctx.strokeStyle='#22304f'; ctx.lineWidth=0.5; ctx.fillStyle='#9ca3af'; ctx.font='10px monospace'; ctx.textAlign='center';
+  const left=60, right=20, drawW=w-left-right;
+  const startSec = Math.floor(t0);
+  for(let s=startSec; s<=t0+VISIBLE_WINDOW; s+=1){
+    const x = left + ((s - t0)/VISIBLE_WINDOW) * drawW;
+    if(x>=left && x<=w-right){
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
+      if(s%5===0) ctx.fillText(fmtTime(s), x, h-4);
+    }
+  }
+}
+
+/* Base pour REF (0→durée) */
+function drawBaseRef(duration){
+  const w=baseRef.width, h=baseRef.height; const ctx=baseRef.getContext('2d');
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle='#0b1324'; ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle='#1a2642'; ctx.lineWidth=0.5;
+  for(let i=0;i<5;i++){ const y=(h/4)*i; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();}
+  ctx.strokeStyle='#10b981'; ctx.setLineDash([4,4]); ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(0,h/2); ctx.lineTo(w,h/2); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle='#9ca3af'; ctx.font='9px monospace'; ctx.textAlign='left';
+  const vl = [200,150,100,50,0,-50,-100,-150,-200];
+  const vt = ['🔝 Très très aigu','Très aigu','Aigu','Moyen aigu','🎯 Milieu (juste)','Moyen grave','Grave','Très grave','🔻 Très très grave'];
+  for(let i=0;i<vl.length;i++){
+    const y = mapCentsToY(vl[i],h);
+    ctx.fillText(vt[i],2,y+3);
+    ctx.strokeStyle='#2a3a54'; ctx.lineWidth=0.5;
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(58,y); ctx.stroke();
+  }
+  ctx.fillStyle='#9ca3af'; ctx.font='11px monospace'; ctx.textAlign='right';
+  ctx.fillText(`+${Y_RANGE_CENTS}c`,55,16); ctx.textAlign='left'; ctx.fillText(`-${Y_RANGE_CENTS}c`,65,16);
+  ctx.strokeStyle='#22304f'; ctx.fillStyle='#9ca3af'; ctx.font='10px monospace'; ctx.textAlign='center';
+  const left=60,right=20,drawW=w-left-right;
+  const step = duration<=30?1:Math.ceil(duration/30);
+  for(let s=0; s<=Math.ceil(duration); s+=step){
+    const x = left + (s/duration)*drawW;
+    if(x<=w-right){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); ctx.fillText(fmtTime(s), x, h-4); }
+  }
+}
+
+/* ==================== INTERPOLATION CATMULL-ROM ==================== */
+function drawSmoothCurve(ctx, points, tension = 0.5) {
+  if (points.length < 2) return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  if (points.length === 2) {
+    ctx.lineTo(points[1].x, points[1].y);
+  } else {
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[Math.max(0, i - 1)];
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const p3 = points[Math.min(points.length - 1, i + 2)];
+      const cp1x = p1.x + (p2.x - p0.x) / 6 * tension;
+      const cp1y = p1.y + (p2.y - p0.y) / 6 * tension;
+      const cp2x = p2.x - (p3.x - p1.x) / 6 * tension;
+      const cp2y = p2.y - (p3.y - p1.y) / 6 * tension;
+      ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+    }
+  }
+  ctx.stroke();
+}
+
+/* Trace courbe REC */
+function drawRec(tNow){
+  const w=canvasRec.width, h=canvasRec.height, left=60,right=20,drawW=w-left-right;
+  const t0 = Math.max(0, tNow - VISIBLE_WINDOW);
+  const baseSec = Math.floor(t0);
+  if(baseSec !== lastBaseT0Sec){ drawBaseRec(t0); lastBaseT0Sec = baseSec; }
+  ctxRec.clearRect(0,0,w,h); ctxRec.drawImage(baseRec, 0, 0);
+
+  const pts = recordedPitch.filter(p => p.t >= t0);
+  if(pts.length===0) return;
+
+  const curvePoints = pts.map(p => ({
+    x: left + ((p.t - t0)/VISIBLE_WINDOW) * drawW,
+    y: mapCentsToY(p.cents, h)
+  }));
+
+  ctxRec.strokeStyle = getComputedStyle(document.body).getPropertyValue('--blue').trim() || '#3b82f6';
+  ctxRec.lineWidth = 3.5; ctxRec.lineJoin='round'; ctxRec.lineCap='round';
+  drawSmoothCurve(ctxRec, curvePoints, 0.5);
+
+  ctxRec.fillStyle = '#3b82f6';
+  for(const pt of curvePoints){ ctxRec.beginPath(); ctxRec.arc(pt.x, pt.y, 1.5, 0, Math.PI*2); ctxRec.fill(); }
+}
+
+/* Trace courbe REF */
+function drawReference(){
+  const w=canvasRef.width, h=canvasRef.height, left=60,right=20,drawW=w-left-right;
+  ctxRef.clearRect(0,0,w,h); ctxRef.drawImage(baseRef,0,0);
+  if(refData.pitch.length===0) return;
+
+  const curvePoints = refData.pitch.map(p => ({
+    x: left + (p.t / Math.max(refData.duration,1)) * drawW,
+    y: mapCentsToY(clamp(p.cents,-Y_RANGE_CENTS,Y_RANGE_CENTS), h)
+  }));
+
+  ctxRef.strokeStyle = getComputedStyle(document.body).getPropertyValue('--violet').trim() || '#a78bfa';
+  ctxRef.lineWidth = 3.5; ctxRef.lineJoin='round'; ctxRef.lineCap='round';
+  drawSmoothCurve(ctxRef, curvePoints, 0.5);
+
+  ctxRef.fillStyle = '#a78bfa';
+  for(const pt of curvePoints){ ctxRef.beginPath(); ctxRef.arc(pt.x, pt.y, 1.5, 0, Math.PI*2); ctxRef.fill(); }
+}
+
+/* ---------------- Audio init ---------------- */
+async function ensureAudio(){
+  if(!audioCtx){
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    log('INFO','AudioContext créé');
+  }
+  if(audioCtx.state==='suspended'){ await audioCtx.resume(); log('INFO','AudioContext repris'); }
+}
+
+async function activateMic(){
+  try{
+    await ensureAudio();
+    if(!micStream){
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false }
+      });
+      log('INFO','Microphone autorisé');
+    }
+    if(!analyser){
+      const src = audioCtx.createMediaStreamSource(micStream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = DETECT_SIZE;
+      analyser.smoothingTimeConstant = 0;
+      src.connect(analyser);
+      log('INFO','Analyser connecté ('+DETECT_SIZE+')');
+    }
+    btnMic.disabled = true; btnRecStart.disabled = false;
+
+    if(!detector) initDetector();
+    if(!smoother) initSmoother();
+
+    /* start live and reset time baseline */
+    recStart = audioCtx.currentTime;
+    monitorOn = true;
+    btnMonOn.classList.add('active'); btnMonOff.classList.remove('active');
+    startMonitor();
+  }catch(e){ log('ERROR','Mic: '+e.message); }
+}
+
+/* ---------------- Pitch ---------------- */
+let anaBuf = null;
+function initDetector(){
+  try{
+    if(typeof YinDetector==='undefined') throw new Error('YinDetector non disponible');
+    detector = new YinDetector(audioCtx.sampleRate, DETECT_SIZE);
+    detector.threshold = 0.05;
+    anaBuf = new Float32Array(DETECT_SIZE);
+    pitchyStatus.textContent='Détecteur: OK'; pitchyStatus.className='badge ok';
+    log('INFO','Détecteur pitch (YinDetector) initialisé - Seuil: 0.05');
+    return true;
+  }catch(e){
+    pitchyStatus.textContent='Détecteur: ERREUR'; pitchyStatus.className='badge err';
+    log('ERROR','initDetector: '+e.message); return false;
+  }
+}
+function initSmoother(){
+  try{
+    if(typeof PitchSmoother==='undefined'){ log('WARN','PitchSmoother non dispo'); return false; }
+    smoother = new PitchSmoother({
+      medianWindowSize:5, smoothingFactor:0.75, maxPitchJump:250, minConfidence:0.2
+    });
+    log('INFO','PitchSmoother initialisé (median:5, smooth:0.75, jump:250)'); return true;
+  }catch(e){ log('WARN','initSmoother: '+e.message); return false; }
+}
+
+/* ---------------- Recording ---------------- */
+function startRecording(){
+  try{
+    if(!micStream) return log('WARN','Active d’abord le micro');
+    if(!detector) initDetector(); if(!smoother) initSmoother();
+
+    chunks=[]; lastBlob=null; recordedPitch=[];
+    recordDetectionCount=0; recordDetectionRawCount=0;
+    btnDownWebM.disabled=btnDownWAV.disabled=btnDownMP3.disabled=true;
+
+    recStart = audioCtx.currentTime;
+    mediaRecorder = new MediaRecorder(micStream, {mimeType:'audio/webm;codecs=opus', audioBitsPerSecond:128000});
+    mediaRecorder.ondataavailable = e=>{ if(e.data && e.data.size>0) chunks.push(e.data); };
+    mediaRecorder.onstop = ()=>{
+      if(chunks.length>0){ lastBlob = new Blob(chunks, {type: chunks[0].type || 'audio/webm'}); log('INFO','Enregistrement terminé'); btnDownWebM.disabled=btnDownWAV.disabled=btnDownMP3.disabled=false; }
+    };
+
+    mediaRecorder.start(100);
+    btnRecStart.disabled=true; btnRecStop.disabled=false;
+
+    if(timerInterval) clearInterval(timerInterval);
+    timerInterval=setInterval(()=>{ updateTimer(audioCtx.currentTime - recStart); }, 100);
+
+    monitorOn=true; btnMonOn.classList.add('active'); btnMonOff.classList.remove('active');
+    log('INFO','Enregistrement démarré');
+  }catch(e){ log('ERROR','startRecording: '+e.message); }
+}
+function stopRecording(){
+  try{
+    if(mediaRecorder && mediaRecorder.state==='recording'){ mediaRecorder.stop(); }
+    btnRecStart.disabled=false; btnRecStop.disabled=true;
+    clearInterval(timerInterval); updateTimer(0);
+    monitorOn=false;
+  }catch(e){ log('ERROR','stopRecording: '+e.message); }
+}
+
+/* ---------------- Live monitor ---------------- */
+function startMonitor(){
+  if(!detector || !analyser) return;
+  if(rafId) return;
+
+  const tick = ()=>{
+    try{
+      analyser.getFloatTimeDomainData(anaBuf);
+      const hz = detector.detect(anaBuf);
+      if(hz && hz>=MIN_HZ && hz<=MAX_HZ){
+        recordDetectionRawCount++;
+        const smoothed = smoother ? smoother.smooth(hz) : hz;
+        if(smoothed && smoothed>0){
+          const cents = centsFrom(smoothed);
+          const bounded = clamp(cents, -Y_RANGE_CENTS, Y_RANGE_CENTS);
+          const t = audioCtx.currentTime - recStart;
+          recordedPitch.push({t, hz: smoothed, cents: bounded});
+          recordDetectionCount++;
+          const t0 = Math.max(0, t - VISIBLE_WINDOW - 0.5);
+          while(recordedPitch.length && recordedPitch[0].t < t0){ recordedPitch.shift(); }
+        }
+      }
+    }catch(e){ console.error('Pitch detection error:', e); }
+
+    const now = audioCtx.currentTime - recStart;
+    const needBaseRefresh = (Date.now() % REFRESH_BASE_EVERY_MS) < 16;
+    if(needBaseRefresh || Math.floor(Math.max(0, now - VISIBLE_WINDOW)) !== lastBaseT0Sec){
+      drawBaseRec(Math.max(0, now - VISIBLE_WINDOW));
+    }
+    drawRec(now);
+    debugRec.textContent = `Détections brutes: ${recordDetectionRawCount} | Points lissés: ${recordDetectionCount}`;
+
+    if(monitorOn || (mediaRecorder && mediaRecorder.state==='recording')){
+      rafId = requestAnimationFrame(tick);
+    }else{
+      rafId = null;
+    }
+  };
+
+  drawBaseRec(0);
+  rafId = requestAnimationFrame(tick);
+}
+
+/* ---------------- Exports ---------------- */
+function downloadBlob(blob,name){
+  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  log('INFO',`Téléchargé: ${name}`);
+}
+btnDownWebM.onclick = ()=>{ if(!lastBlob) return log('WARN','Aucun enregistrement'); downloadBlob(lastBlob,'take.webm'); };
+btnDownWAV.onclick = async ()=>{
+  try{
+    if(!lastBlob) return log('WARN','Aucun enregistrement');
+    if(!window.WAVExport) return log('ERROR','WAVExport indisponible');
+    const wav = await WAVExport.fromWebM(lastBlob); if(!wav) return log('ERROR','Conversion WAV échouée');
+    downloadBlob(wav,'take.wav');
+  }catch(e){ log('ERROR','WAV download: '+e.message); }
+};
+btnDownMP3.onclick = async ()=>{
+  try{
+    if(!lastBlob) return log('WARN','Aucun enregistrement');
+    if(!window.WAVExport || !window.MP3Export) return log('ERROR','MP3Export indisponible');
+    const wav = await WAVExport.fromWebM(lastBlob); if(!wav) return log('ERROR','Conversion WAV échouée');
+    log('INFO','Encodage MP3 en cours…'); const mp3 = await MP3Export.fromWav(wav); if(!mp3) return log('ERROR','Conversion MP3 échouée');
+    downloadBlob(mp3,'take.mp3');
+  }catch(e){ log('ERROR','MP3 download: '+e.message); }
+};
+btnClearRec.onclick = ()=>{
+  chunks=[]; lastBlob=null; recordedPitch=[]; recordDetectionCount=0; recordDetectionRawCount=0;
+  drawBaseRec(0); ctxRec.clearRect(0,0,canvasRec.width,canvasRec.height); ctxRec.drawImage(baseRec,0,0);
+  debugRec.textContent='Détections brutes: 0 | Points lissés: 0';
+  btnDownWebM.disabled=btnDownWAV.disabled=btnDownMP3.disabled=true;
+  log('INFO','Enregistrement effacé');
+};
+
+/* ---------------- Uploads ---------------- */
+fileUploadRec.addEventListener('change', async e=>{
+  try{
+    const file=e.target.files[0]; if(!file) return;
+    await ensureAudio(); const buf=await file.arrayBuffer();
+    lastBlob = new Blob([buf], {type:file.type}); chunks=[lastBlob];
+    btnDownWebM.disabled=btnDownWAV.disabled=btnDownMP3.disabled=false;
+    log('INFO',`Fichier chargé: ${file.name}`);
+  }catch(err){ log('ERROR','Upload rec: '+err.message); }
+});
+
+fileUploadRef.addEventListener('change', async e=>{
+  try{
+    const file=e.target.files[0]; if(!file) return;
+    await ensureAudio(); const buf=await file.arrayBuffer();
+    const audio=await audioCtx.decodeAudioData(buf); const ch=audio.getChannelData(0);
+    refData.duration = audio.duration; refDetectionCount=0;
+    if(smoother && smoother.reset) smoother.reset();
+
+    const result=[]; const win=DETECT_SIZE, hop=win>>1; let raw=0, kept=0;
+    for(let i=0; i+win<=ch.length; i+=hop){
+      const slice = ch.subarray(i,i+win);
+      const hz = detector.detect(slice);
+      if(hz && hz>=MIN_HZ && hz<=MAX_HZ){
+        raw++;
+        const sm = smoother ? smoother.smooth(hz) : hz;
+        if(sm && sm>0){
+          kept++;
+          const cents = centsFrom(sm);
+          result.push({t:i/audio.sampleRate, hz: sm, cents: clamp(cents,-Y_RANGE_CENTS,Y_RANGE_CENTS)});
+        }
+      }
+    }
+    refDetectionCount = kept; refData.pitch = result;
+    drawBaseRef(refData.duration); drawReference();
+    debugRef.textContent = `Détections brutes: ${raw} | Points lissés: ${kept}`;
+    log('INFO',`Référence chargée: ${file.name} (${audio.duration.toFixed(1)}s, ${result.length} points)`);
+  }catch(err){ log('ERROR','Upload ref: '+err.message); }
+});
+btnClearRef.onclick = ()=>{
+  refData={pitch:[],duration:0}; refDetectionCount=0; drawBaseRef(1); ctxRef.clearRect(0,0,canvasRef.width,canvasRef.height); ctxRef.drawImage(baseRef,0,0);
+  debugRef.textContent='Détections brutes: 0 | Points lissés: 0'; mAvg.textContent='—'; mMax.textContent='—'; mInTune.textContent='—';
+  log('INFO','Référence effacée');
+};
+
+/* ---------------- Events ---------------- */
+btnMic.onclick = ()=> activateMic();
+btnRecStart.onclick = ()=> startRecording();
+btnRecStop.onclick = ()=> stopRecording();
+btnMonOff.onclick = ()=>{ monitorOn=false; btnMonOff.classList.add('active'); btnMonOn.classList.remove('active'); };
+btnMonOn.onclick  = ()=>{ monitorOn=true; btnMonOn.classList.add('active'); btnMonOff.classList.remove('active'); if(audioCtx) startMonitor(); };
+btnMode440.onclick = ()=>{ anchorMode='a440'; btnMode440.classList.add('active'); btnModeAuto.classList.remove('active'); };
+btnModeAuto.onclick = ()=>{ anchorMode='auto'; btnModeAuto.classList.add('active'); btnMode440.classList.remove('active'); };
+
+drawBaseRec(0); ctxRec.drawImage(baseRec,0,0); drawBaseRef(1); ctxRef.drawImage(baseRef,0,0);
+log('INFO','Interface prête — Live 30s, ±200c, mode Auto, ticks 1s / labels 5s');
+</script>
+</body>
+</html>

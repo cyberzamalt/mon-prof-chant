@@ -31,7 +31,7 @@
   let smoother = null;
   let rafId = 0;
 
-  // DSP
+  // DSP (optionnels)
   let hpf = null;
   let gate = null;
 
@@ -48,38 +48,50 @@
 
   let scaleMode = "abs"; // 'abs' | 'a440' | 'auto'
   const Y_RANGE_CENTS = 200;
+  // fenêtre large pour A440 (évite ligne collée en bas)
+  const A440_RANGE_CENTS = 3000; // ≈ ±2.5 octaves
 
   // ------- Helpers -------
   const hzToMidi = (hz) => 69 + 12 * Math.log2(hz / 440);
-  const clamp = (v, a, b) => v < a ? a : (v > b ? b : v);
+  const clamp = (v, a, b) => (v < a ? a : (v > b ? b : v));
+
   function centsFrom(hz, mode){
     if (mode === "a440") return 1200 * Math.log2(hz / 440);
     const midi = Math.round(hzToMidi(hz));
     const baseHz = 440 * Math.pow(2, (midi - 69) / 12);
     return 1200 * Math.log2(hz / baseHz);
   }
+
   function mapPitchToY(hz, h){
     if (scaleMode === "abs") {
       const MIDI_MIN = hzToMidi(MIN_HZ), MIDI_MAX = hzToMidi(MAX_HZ);
-      const top=20, bottom=h-40;
-      const n = clamp((hzToMidi(hz)-MIDI_MIN)/(MIDI_MAX-MIDI_MIN),0,1);
-      return bottom - n*(bottom-top);
+      const top = 20, bottom = h - 40;
+      const n = clamp((hzToMidi(hz) - MIDI_MIN) / (MIDI_MAX - MIDI_MIN), 0, 1);
+      return bottom - n * (bottom - top);
     } else {
-      const cents = clamp(centsFrom(hz, scaleMode), -Y_RANGE_CENTS, Y_RANGE_CENTS);
-      const H = h - 60; const mid = h/2;
-      const pxPerCent = H / (2 * Y_RANGE_CENTS);
+      // A440 = fenêtre large ; Auto = fenêtre serrée (±200 cents)
+      const range = (scaleMode === "a440") ? A440_RANGE_CENTS : Y_RANGE_CENTS;
+      const cents = clamp(centsFrom(hz, scaleMode), -range, range);
+      const H = h - 60; const mid = h / 2;
+      const pxPerCent = H / (2 * range);
       return mid - cents * pxPerCent;
     }
   }
-  function fmtTime(secs){ const m=String(Math.floor(secs/60)).padStart(2,"0"); const s=String(Math.floor(secs%60)).padStart(2,"0"); return `${m}:${s}`; }
+
+  function fmtTime(secs){
+    const m = String(Math.floor(secs/60)).padStart(2,"0");
+    const s = String(Math.floor(secs%60)).padStart(2,"0");
+    return `${m}:${s}`;
+  }
 
   // ------- Draw -------
   const base = document.createElement("canvas"); base.width = canvas.width; base.height = canvas.height;
   let lastSec = -1;
+
   function drawBase(t0) {
-    const w=base.width, h=base.height; const b=base.getContext("2d");
+    const w = base.width, h = base.height; const b = base.getContext("2d");
     b.clearRect(0,0,w,h);
-    b.fillStyle="#0b1324"; b.fillRect(0,0,w,h);
+    b.fillStyle = "#0b1324"; b.fillRect(0,0,w,h);
 
     // lignes
     b.strokeStyle="#1a2642"; b.lineWidth=0.5;
@@ -124,7 +136,7 @@
     const vis = points.filter(p=>p.t>=t0);
     if (!vis.length) return;
 
-    // courbe lisse
+    // courbe
     ctx.strokeStyle=getComputedStyle(document.body).getPropertyValue('--blue').trim()||'#3b82f6';
     ctx.lineWidth=3; ctx.lineJoin='round'; ctx.lineCap='round';
     ctx.beginPath();
@@ -165,7 +177,7 @@
       detector.threshold = 0.06;
       smoother = new PitchSmoother({ medianWindowSize:5, smoothingFactor:0.76, maxPitchJump:250 });
 
-      // DSP: HPF + NoiseGate
+      // DSP: HPF + NoiseGate (si présents)
       if (typeof BiquadHPF !== "undefined") {
         hpf = new BiquadHPF(audioCtx.sampleRate, 80, Math.SQRT1_2);
       }
@@ -173,7 +185,7 @@
         gate = new NoiseGate(audioCtx.sampleRate, { thresholdDb: -50, reductionDb: -80, attackMs: 5, releaseMs: 50, holdMs: 30 });
       }
 
-      // buffers de travail
+      // buffers
       bufRaw  = new Float32Array(DETECT_SIZE);
       bufHPF  = new Float32Array(DETECT_SIZE);
       bufGate = new Float32Array(DETECT_SIZE);
@@ -201,15 +213,8 @@
       analyser.getFloatTimeDomainData(bufRaw);
 
       let sig = bufRaw;
-
-      if (hpf) {
-        hpf.process(sig, bufHPF);
-        sig = bufHPF;
-      }
-      if (gate) {
-        gate.process(sig, bufGate);
-        sig = bufGate;
-      }
+      if (hpf) { hpf.process(sig, bufHPF); sig = bufHPF; }
+      if (gate){ gate.process(sig, bufGate); sig = bufGate; }
 
       const hz = detector.detect(sig);
       if (hz && hz >= MIN_HZ && hz <= MAX_HZ) {

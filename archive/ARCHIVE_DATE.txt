@@ -1,0 +1,7 @@
+Archive créée le : 29 Octobre 2025
+Auteur : Nicolas Abriou
+
+Fichiers archivés :
+- index.html → archive/monolith/index.html.backup
+
+Raison : Sauvegarde avant migration modulaire

@@ -1,182 +1,468 @@
-// PitchService.js — mesure de pitch + enregistrement + exports
-import { Logger } from '../../logging/Logger.js';
+/**
+ * PitchService.js - Service d'Analyse Pitch
+ * 
+ * Orchestre la détection et le lissage des pitches
+ * Service de haut niveau pour l'analyse audio
+ * 
+ * Fichier 10/18 - ANALYSE & LISSAGE
+ * Dépend de: Logger.js, AudioEngine.js, PitchDetector.js, PitchSmoother.js, AudioMath.js
+ */
 
-export default class PitchService {
-  constructor(engine, { onReadyNote } = {}) {
-    this.engine = engine;
-    this.onReadyNote = onReadyNote;
-    this.stream = null;
-    this.srcNode = null;
-    this.analyser = null;
-    this.workBuf = new Float32Array(2048);
-    this._lastHz = 0;
-    this._refNote = null;
+import Logger from '../../logging/Logger.js';
+import AudioEngine from '../core/AudioEngine.js';
+import PitchDetector from './PitchDetector.js';
+import PitchSmoother from '../dsp/PitchSmoother.js';
+import { hzToNote, centsFrom, isValidHz } from '../../utils/AudioMath.js';
+import { PITCH_DETECTION } from '../../config/constants.js';
 
-    // MediaRecorder
-    this.recorder = null;
-    this.chunks = [];
-    this.recWebm = null;
-  }
-
-  async attachStream(stream){
-    const ctx = this.engine.getContext();
-    if(!ctx) throw new Error('AudioContext indisponible');
-    this.stream = stream;
-    this.srcNode = ctx.createMediaStreamSource(stream);
-    this.analyser = ctx.createAnalyser();
-    this.analyser.fftSize = 2048;
-    this.srcNode.connect(this.analyser);
-    Logger.info('PitchService', 'Stream attached');
-
-    // Fixe une note de ref dès la première note stable
-    this._refNote = null; // sera déterminée à la 1re mesure fiable
-  }
-
-  // --- Détection de pitch (YIN simplifié) ---
-  measure(){
-    if(!this.analyser) return null;
-    this.analyser.getFloatTimeDomainData(this.workBuf);
-    const hz = autoCorrelate(this.workBuf, this.engine.getContext().sampleRate);
-    if(hz>0){
-      this._lastHz = hz;
-      if(!this._refNote){
-        this._refNote = hzToNoteName(hz);
-        this.onReadyNote?.(this._refNote.name);
-      }
-      const name = hzToNoteName(hz).name;
-      const cents = centsFromRef(hz, this._refNote?.hz ?? hz);
-      return { hz, noteName: name, cents };
-    }
-    return null;
-  }
-
-  async startRecord(){
-    if(!this.stream) throw new Error('Aucun flux micro');
-    if(this.recorder && this.recorder.state==='recording') return;
-    this.chunks = [];
-    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-    this.recorder = new MediaRecorder(this.stream, { mimeType: mime });
-    this.recorder.ondataavailable = e=> e.data.size && this.chunks.push(e.data);
-    this.recorder.onstop = ()=>{
-      this.recWebm = new Blob(this.chunks, { type: this.recorder.mimeType });
+class PitchService {
+  constructor() {
+    this.detector = null;
+    this.smoother = null;
+    this.isRunning = false;
+    this.currentPitch = null;
+    this.pitchHistory = [];
+    this.maxHistorySize = 1000;
+    
+    // Callbacks
+    this.onPitchDetected = null;
+    this.onPitchSmoothed = null;
+    
+    // Stats
+    this.stats = {
+      totalDetections: 0,
+      validDetections: 0,
+      invalidDetections: 0,
+      avgConfidence: 0
     };
-    this.recorder.start();
-    Logger.info('PitchService', 'MediaRecorder started');
+    
+    Logger.info('PitchService', 'Service créé');
   }
-
-  async stopRecord(){
-    if(this.recorder && this.recorder.state!=='inactive'){
-      await new Promise(res=>{ this.recorder.onstop = ()=>{ 
-        this.recWebm = new Blob(this.chunks, { type: this.recorder.mimeType });
-        res(); 
-      }; this.recorder.stop(); });
-      Logger.info('PitchService', 'MediaRecorder stopped');
+  
+  /**
+   * Initialise le service
+   * @returns {Promise<boolean>} true si succès
+   */
+  async init() {
+    try {
+      Logger.info('PitchService', 'Initialisation...');
+      
+      // Récupérer le sample rate de l'AudioEngine
+      const sampleRate = AudioEngine.getSampleRate() || PITCH_DETECTION.SAMPLE_RATE;
+      
+      // Créer le détecteur
+      this.detector = new PitchDetector(sampleRate);
+      
+      // Créer le smoother
+      this.smoother = new PitchSmoother();
+      
+      Logger.success('PitchService', 'Service initialisé');
+      
+      return true;
+      
+    } catch (error) {
+      Logger.error('PitchService', 'Erreur initialisation', error);
+      return false;
     }
   }
-
-  async getExports(){
-    const out = {};
-    if(this.recWebm) out.webm = { blob:this.recWebm, name: autoName('recording','.webm') };
-
-    // WAV (PCM) depuis WebAudio (simple downmix)
-    if(this.recWebm){
-      const wav = await webmToWav(this.recWebm);
-      if(wav) out.wav = { blob:wav, name: autoName('recording','.wav') };
-      const mp3 = await wavToMp3(wav);
-      if(mp3) out.mp3 = { blob:mp3, name: autoName('recording','.mp3') };
+  
+  /**
+   * Démarre l'analyse en temps réel
+   * @param {Function} callback - Callback appelé à chaque détection
+   * @returns {boolean} true si démarré
+   */
+  start(callback = null) {
+    if (this.isRunning) {
+      Logger.warn('PitchService', 'Déjà en cours');
+      return false;
     }
-    return out;
+    
+    try {
+      Logger.info('PitchService', 'Démarrage analyse temps réel...');
+      
+      // Initialiser si nécessaire
+      if (!this.detector || !this.smoother) {
+        this.init();
+      }
+      
+      // Sauvegarder le callback
+      if (callback) {
+        this.onPitchSmoothed = callback;
+      }
+      
+      this.isRunning = true;
+      
+      Logger.success('PitchService', 'Analyse démarrée');
+      
+      return true;
+      
+    } catch (error) {
+      Logger.error('PitchService', 'Erreur démarrage', error);
+      return false;
+    }
+  }
+  
+  /**
+   * Arrête l'analyse
+   */
+  stop() {
+    if (!this.isRunning) {
+      Logger.warn('PitchService', 'Déjà arrêté');
+      return;
+    }
+    
+    try {
+      Logger.info('PitchService', 'Arrêt analyse...');
+      
+      this.isRunning = false;
+      
+      Logger.success('PitchService', 'Analyse arrêtée', {
+        totalDetections: this.stats.totalDetections,
+        validDetections: this.stats.validDetections
+      });
+      
+    } catch (error) {
+      Logger.error('PitchService', 'Erreur arrêt', error);
+    }
+  }
+  
+  /**
+   * Analyse un frame audio
+   * @param {Float32Array} buffer - Buffer audio
+   * @returns {object|null} Résultat d'analyse
+   */
+  analyzeFrame(buffer) {
+    if (!this.detector || !this.smoother) {
+      Logger.warn('PitchService', 'Service non initialisé');
+      return null;
+    }
+    
+    try {
+      this.stats.totalDetections++;
+      
+      // Détection du pitch brut
+      const rawPitch = this.detector.detect(buffer);
+      
+      if (!rawPitch || !isValidHz(rawPitch)) {
+        this.stats.invalidDetections++;
+        
+        // Callback avec null si configuré
+        if (this.onPitchDetected) {
+          this.onPitchDetected(null);
+        }
+        
+        return null;
+      }
+      
+      this.stats.validDetections++;
+      
+      // Callback pitch brut
+      if (this.onPitchDetected) {
+        this.onPitchDetected(rawPitch);
+      }
+      
+      // Lissage du pitch
+      const smoothedPitch = this.smoother.smooth(rawPitch);
+      
+      if (!smoothedPitch) {
+        return null;
+      }
+      
+      // Conversion en note
+      const noteInfo = hzToNote(smoothedPitch);
+      
+      // Calcul des cents (mode A440 et Auto)
+      const centsA440 = centsFrom(smoothedPitch, 'a440');
+      const centsAuto = centsFrom(smoothedPitch, 'auto');
+      
+      // Créer l'objet résultat
+      const result = {
+        timestamp: Date.now(),
+        raw: rawPitch,
+        smoothed: smoothedPitch,
+        note: noteInfo.note,
+        octave: noteInfo.octave,
+        fullNote: noteInfo.fullName,
+        centsA440: centsA440,
+        centsAuto: centsAuto,
+        midi: noteInfo.midi
+      };
+      
+      // Sauvegarder dans l'historique
+      this.pitchHistory.push(result);
+      
+      // Limiter la taille de l'historique
+      if (this.pitchHistory.length > this.maxHistorySize) {
+        this.pitchHistory.shift();
+      }
+      
+      // Mettre à jour le pitch actuel
+      this.currentPitch = result;
+      
+      // Callback pitch lissé
+      if (this.onPitchSmoothed) {
+        this.onPitchSmoothed(result);
+      }
+      
+      return result;
+      
+    } catch (error) {
+      Logger.error('PitchService', 'Erreur analyse frame', error);
+      return null;
+    }
+  }
+  
+  /**
+   * Analyse un buffer audio complet (post-traitement)
+   * @param {Float32Array} audioData - Données audio complètes
+   * @param {number} sampleRate - Sample rate
+   * @returns {object} Résultats d'analyse
+   */
+  analyzeAudioBuffer(audioData, sampleRate) {
+    try {
+      Logger.info('PitchService', 'Analyse buffer complet...', {
+        samples: audioData.length,
+        duration: (audioData.length / sampleRate).toFixed(2) + 's'
+      });
+      
+      // Réinitialiser le détecteur et smoother pour cette analyse
+      const detector = new PitchDetector(sampleRate);
+      const smoother = new PitchSmoother();
+      
+      const results = [];
+      const frameSize = PITCH_DETECTION.DETECT_SIZE;
+      const hopSize = Math.floor(frameSize / 2); // 50% overlap
+      
+      // Analyser frame par frame
+      for (let i = 0; i < audioData.length - frameSize; i += hopSize) {
+        const frame = audioData.slice(i, i + frameSize);
+        
+        // Détection
+        const rawPitch = detector.detect(frame);
+        
+        if (rawPitch && isValidHz(rawPitch)) {
+          // Lissage
+          const smoothedPitch = smoother.smooth(rawPitch);
+          
+          if (smoothedPitch) {
+            const noteInfo = hzToNote(smoothedPitch);
+            
+            results.push({
+              time: i / sampleRate,
+              raw: rawPitch,
+              smoothed: smoothedPitch,
+              note: noteInfo.note,
+              octave: noteInfo.octave,
+              fullNote: noteInfo.fullName,
+              centsA440: centsFrom(smoothedPitch, 'a440'),
+              centsAuto: centsFrom(smoothedPitch, 'auto'),
+              midi: noteInfo.midi
+            });
+          }
+        }
+      }
+      
+      Logger.success('PitchService', 'Analyse terminée', {
+        detections: results.length
+      });
+      
+      // Calculer les statistiques
+      const statistics = this.calculateStatistics(results);
+      
+      return {
+        detections: results,
+        statistics,
+        duration: audioData.length / sampleRate,
+        sampleRate
+      };
+      
+    } catch (error) {
+      Logger.error('PitchService', 'Erreur analyse buffer', error);
+      return {
+        detections: [],
+        statistics: null,
+        error: error.message
+      };
+    }
+  }
+  
+  /**
+   * Calcule les statistiques d'une analyse
+   * @param {Array} detections - Tableau de détections
+   * @returns {object} Statistiques
+   */
+  calculateStatistics(detections) {
+    if (!detections || detections.length === 0) {
+      return {
+        count: 0,
+        avgPitch: 0,
+        minPitch: 0,
+        maxPitch: 0,
+        avgCents: 0,
+        notesDistribution: {}
+      };
+    }
+    
+    try {
+      const pitches = detections.map(d => d.smoothed);
+      const cents = detections.map(d => d.centsAuto);
+      
+      // Stats de base
+      const avgPitch = pitches.reduce((a, b) => a + b, 0) / pitches.length;
+      const minPitch = Math.min(...pitches);
+      const maxPitch = Math.max(...pitches);
+      const avgCents = cents.reduce((a, b) => a + b, 0) / cents.length;
+      
+      // Distribution des notes
+      const notesDistribution = {};
+      detections.forEach(d => {
+        const key = d.fullNote;
+        notesDistribution[key] = (notesDistribution[key] || 0) + 1;
+      });
+      
+      return {
+        count: detections.length,
+        avgPitch: avgPitch.toFixed(2),
+        minPitch: minPitch.toFixed(2),
+        maxPitch: maxPitch.toFixed(2),
+        avgCents: avgCents.toFixed(1),
+        notesDistribution
+      };
+      
+    } catch (error) {
+      Logger.error('PitchService', 'Erreur calcul statistiques', error);
+      return null;
+    }
+  }
+  
+  /**
+   * Récupère le pitch actuel
+   * @returns {object|null} Pitch actuel
+   */
+  getCurrentPitch() {
+    return this.currentPitch;
+  }
+  
+  /**
+   * Récupère l'historique des pitches
+   * @param {number} count - Nombre d'entrées (optionnel)
+   * @returns {Array} Historique
+   */
+  getHistory(count = null) {
+    if (count === null) {
+      return [...this.pitchHistory];
+    }
+    
+    const start = Math.max(0, this.pitchHistory.length - count);
+    return this.pitchHistory.slice(start);
+  }
+  
+  /**
+   * Efface l'historique
+   */
+  clearHistory() {
+    this.pitchHistory = [];
+    this.currentPitch = null;
+    
+    if (this.smoother) {
+      this.smoother.reset();
+    }
+    
+    Logger.info('PitchService', 'Historique effacé');
+  }
+  
+  /**
+   * Récupère les statistiques globales
+   * @returns {object} Statistiques
+   */
+  getStats() {
+    return {
+      ...this.stats,
+      successRate: this.stats.totalDetections > 0
+        ? ((this.stats.validDetections / this.stats.totalDetections) * 100).toFixed(1) + '%'
+        : '0%',
+      historySize: this.pitchHistory.length
+    };
+  }
+  
+  /**
+   * Réinitialise les statistiques
+   */
+  resetStats() {
+    this.stats = {
+      totalDetections: 0,
+      validDetections: 0,
+      invalidDetections: 0,
+      avgConfidence: 0
+    };
+    
+    Logger.info('PitchService', 'Statistiques réinitialisées');
+  }
+  
+  /**
+   * Configure les callbacks
+   * @param {object} callbacks - Objet avec onPitchDetected et onPitchSmoothed
+   */
+  setCallbacks(callbacks) {
+    if (callbacks.onPitchDetected) {
+      this.onPitchDetected = callbacks.onPitchDetected;
+    }
+    
+    if (callbacks.onPitchSmoothed) {
+      this.onPitchSmoothed = callbacks.onPitchSmoothed;
+    }
+    
+    Logger.info('PitchService', 'Callbacks configurés');
+  }
+  
+  /**
+   * Configure le détecteur
+   * @param {object} config - Configuration
+   */
+  setDetectorConfig(config) {
+    if (!this.detector) {
+      Logger.warn('PitchService', 'Détecteur non initialisé');
+      return;
+    }
+    
+    try {
+      if (config.threshold !== undefined) {
+        this.detector.setThreshold(config.threshold);
+      }
+      
+      if (config.minHz !== undefined && config.maxHz !== undefined) {
+        this.detector.setRange(config.minHz, config.maxHz);
+      }
+      
+      Logger.success('PitchService', 'Configuration détecteur mise à jour');
+      
+    } catch (error) {
+      Logger.error('PitchService', 'Erreur config détecteur', error);
+    }
+  }
+  
+  /**
+   * Configure le smoother
+   * @param {object} config - Configuration
+   */
+  setSmootherConfig(config) {
+    if (!this.smoother) {
+      Logger.warn('PitchService', 'Smoother non initialisé');
+      return;
+    }
+    
+    try {
+      this.smoother.setConfig(config);
+      Logger.success('PitchService', 'Configuration smoother mise à jour');
+      
+    } catch (error) {
+      Logger.error('PitchService', 'Erreur config smoother', error);
+    }
   }
 }
 
-/* ---------- Utils pitch ---------- */
-function autoCorrelate(buf, sampleRate){
-  // YIN-like autocorrelation (rapide & robuste voix)
-  let SIZE = buf.length;
-  let rms=0;
-  for(let i=0;i<SIZE;i++){ const v=buf[i]; rms+=v*v; }
-  rms = Math.sqrt(rms/SIZE);
-  if(rms<0.01) return -1;
+// Créer une instance unique (singleton)
+const pitchService = new PitchService();
 
-  let r1=0, r2=SIZE-1, th=0.2;
-  for(let i=0;i<SIZE/2;i++){ if(Math.abs(buf[i])<th){ r1=i; break; } }
-  for(let i=1;i<SIZE/2;i++){ if(Math.abs(buf[SIZE-i])<th){ r2=SIZE-i; break; } }
-  buf = buf.slice(r1, r2); SIZE = buf.length;
-
-  const c = new Array(SIZE).fill(0);
-  for(let i=0;i<SIZE;i++){
-    for(let j=0;j<SIZE-i;j++) c[i]+=buf[j]*buf[j+i];
-  }
-  let d=0; while(d<SIZE && c[d]>c[d+1]) d++;
-  let maxval=-1, maxpos=-1;
-  for(let i=d;i<SIZE;i++){ if(c[i]>maxval){ maxval=c[i]; maxpos=i; } }
-  let T0 = maxpos;
-  const x1=c[T0-1], x2=c[T0], x3=c[T0+1];
-  const a=(x1+x3-2*x2)/2, b=(x3-x1)/2;
-  if(a) T0 = T0 - b/(2*a);
-  return sampleRate/T0;
-}
-
-function hzToNoteName(hz){
-  // A4 = 440Hz
-  const A4=440, A4_MIDI=69;
-  const midi = Math.round(12*Math.log2(hz/A4))+A4_MIDI;
-  const names=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-  const name = names[(midi+1200)%12] + Math.floor((midi-12)/12);
-  return { name, hzFromMidi: midiToHz(midi), hz };
-}
-function midiToHz(m){ return 440*Math.pow(2,(m-69)/12); }
-
-function centsFromRef(hz, refHz){
-  // distance en cents entre hz et refHz
-  return 1200*Math.log2(hz/refHz);
-}
-
-function autoName(base, ext){ const d=new Date(); const t=d.toISOString().replace(/[:.]/g,'-'); return `${base}-${t}${ext}`; }
-
-/* ---------- Conversions audio (simples) ---------- */
-async function webmToWav(webmBlob){
-  try{
-    const ab = await webmBlob.arrayBuffer();
-    const ctx = new (window.OfflineAudioContext||window.webkitOfflineAudioContext)(1, 48000*10, 48000); // buffer dummy
-    const audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-    const audioBuf = await audioCtx.decodeAudioData(ab);
-    // encode PCM WAV
-    const wav = encodeWav(audioBuf);
-    audioCtx.close();
-    return new Blob([wav], { type:'audio/wav' });
-  }catch{ return null; }
-}
-function encodeWav(audioBuffer){
-  const numCh = audioBuffer.numberOfChannels;
-  const sampleRate = audioBuffer.sampleRate;
-  const samples = audioBuffer.getChannelData(0);
-  const buffer = new ArrayBuffer(44 + samples.length*2);
-  const view = new DataView(buffer);
-
-  function writeString(o,s){ for (let i=0;i<s.length;i++) view.setUint8(o+i, s.charCodeAt(i)); }
-  function write16(o,v){ view.setUint16(o,v,true); }
-  function write32(o,v){ view.setUint32(o,v,true); }
-
-  writeString(0,'RIFF'); write32(4,36+samples.length*2); writeString(8,'WAVE');
-  writeString(12,'fmt '); write32(16,16); write16(20,1); write16(22,numCh);
-  write32(24,sampleRate); write32(28,sampleRate*numCh*2); write16(32,numCh*2); write16(34,16);
-  writeString(36,'data'); write32(40,samples.length*2);
-  // PCM16
-  let offset=44;
-  for(let i=0;i<samples.length;i++){ 
-    let s = Math.max(-1, Math.min(1, samples[i])); 
-    view.setInt16(offset, s<0 ? s*0x8000 : s*0x7FFF, true); 
-    offset+=2; 
-  }
-  return view;
-}
-
-async function wavToMp3(wavBlob){
-  // Sans dépendance lourde : on garde cette étape optionnelle (peut renvoyer null si indispo)
-  // Tu as déjà WebM/WAV fiables. MP3 restera best-effort.
-  try{
-    // Si tu ajoutes lamejs plus tard, on branchera ici.
-    return null;
-  }catch{ return null; }
-}
+// Exporter l'instance
+export default pitchService;

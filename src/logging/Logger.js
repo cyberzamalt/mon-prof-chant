@@ -1,247 +1,271 @@
 /**
- * Logger.js
- * TYPE: Utility - Singleton Logging System
+ * Logger.js - Système de Logging Centralisé
  * 
- * Responsabilités:
- * - Logging centralisé avec timestamps précis
- * - Niveaux: DEBUG, INFO, WARN, ERROR, FATAL
- * - Affichage console + storage en mémoire
- * - Fallback robuste si quelque chose échoue
+ * Gère tous les logs de l'application (info, warn, error, success)
+ * Permet un debug facile et un suivi des opérations
  * 
- * Dépendances: AUCUNE (fondation)
- * Utilisé par: TOUS les autres modules
+ * Fichier 1/18 - FONDATIONS
+ * Pas de dépendances
  */
 
 class Logger {
+  constructor() {
+    this.enabled = true;
+    this.logHistory = [];
+    this.maxHistorySize = 500;
+    
+    // Préfixes colorés pour la console
+    this.prefixes = {
+      info: '🔵 [INFO]',
+      warn: '⚠️  [WARN]',
+      error: '🔴 [ERROR]',
+      success: '✅ [SUCCESS]',
+      debug: '🐛 [DEBUG]'
+    };
+    
+    this.colors = {
+      info: 'color: #2196F3',
+      warn: 'color: #FF9800',
+      error: 'color: #F44336; font-weight: bold',
+      success: 'color: #4CAF50',
+      debug: 'color: #9E9E9E'
+    };
+    
+    this.init();
+  }
+  
   /**
-   * Configuration statique du logger
+   * Initialise le logger
    */
-  static #config = {
-    maxLogs: 500,
-    minLevel: 0,
-    enableConsole: true,
-    enableStorage: true,
-  };
-
-  /**
-   * Niveaux de log avec priorités
-   */
-  static #levels = {
-    DEBUG: { value: 0, color: '#888', style: '[DEBUG]' },
-    INFO: { value: 1, color: '#0ea5e9', style: '[INFO]' },
-    WARN: { value: 2, color: '#f59e0b', style: '[WARN]' },
-    ERROR: { value: 3, color: '#ef4444', style: '[ERROR]' },
-    FATAL: { value: 4, color: '#dc2626', style: '[FATAL]' },
-  };
-
-  /**
-   * Stockage des logs en mémoire
-   */
-  static #logBuffer = [];
-
-  /**
-   * État du logger
-   */
-  static #initialized = false;
-
-  /**
-   * Initialiser le logger
-   */
-  static initialize(options = {}) {
+  init() {
     try {
-      Logger.#config = { ...Logger.#config, ...options };
-      Logger.#initialized = true;
-      Logger.info('Logger', 'Initialized');
-      return true;
+      this.log('Logger', 'Système de logging initialisé', {}, 'info');
+      
+      // Écouter les erreurs globales
+      window.addEventListener('error', (event) => {
+        this.error('Global', 'Erreur non capturée', {
+          message: event.message,
+          filename: event.filename,
+          lineno: event.lineno,
+          colno: event.colno
+        });
+      });
+      
+      // Écouter les promesses rejetées non gérées
+      window.addEventListener('unhandledrejection', (event) => {
+        this.error('Global', 'Promise rejetée non gérée', {
+          reason: event.reason
+        });
+      });
+      
     } catch (err) {
-      console.error('[Logger] Initialization failed:', err);
-      return false;
+      console.error('Erreur init Logger:', err);
     }
   }
-
+  
   /**
-   * DEBUG - Informations détaillées pour le développement
+   * Log générique
+   * @param {string} module - Nom du module qui log
+   * @param {string} message - Message à logger
+   * @param {object} data - Données additionnelles
+   * @param {string} level - Niveau (info/warn/error/success/debug)
    */
-  static debug(module, message, data = null) {
-    Logger.#log('DEBUG', module, message, data);
-  }
-
-  /**
-   * INFO - Informations générales
-   */
-  static info(module, message, data = null) {
-    Logger.#log('INFO', module, message, data);
-  }
-
-  /**
-   * WARN - Avertissements
-   */
-  static warn(module, message, data = null) {
-    Logger.#log('WARN', module, message, data);
-  }
-
-  /**
-   * ERROR - Erreurs
-   */
-  static error(module, message, data = null) {
-    Logger.#log('ERROR', module, message, data);
-  }
-
-  /**
-   * FATAL - Erreurs critiques
-   */
-  static fatal(module, message, data = null) {
-    Logger.#log('FATAL', module, message, data);
-  }
-
-  /**
-   * Fonction interne: Traitement du log
-   */
-  static #log(levelName, module, message, data = null) {
+  log(module, message, data = {}, level = 'info') {
+    if (!this.enabled) return;
+    
     try {
-      const level = Logger.#levels[levelName];
-      if (!level || level.value < Logger.#config.minLevel) {
-        return;
-      }
-
-      const now = new Date();
-      const hours = String(now.getHours()).padStart(2, '0');
-      const minutes = String(now.getMinutes()).padStart(2, '0');
-      const seconds = String(now.getSeconds()).padStart(2, '0');
-      const ms = String(now.getMilliseconds()).padStart(3, '0');
-      const timestamp = `${hours}:${minutes}:${seconds}.${ms}`;
-
+      const timestamp = new Date().toISOString();
       const logEntry = {
         timestamp,
-        level: levelName,
-        module: module || 'Unknown',
-        message: message || '(no message)',
-        data: data || null,
-        formattedMessage: `[${timestamp}] ${level.style} [${module}] ${message}`,
+        module,
+        message,
+        data,
+        level
       };
-
-      if (Logger.#config.enableConsole) {
-        Logger.#logToConsole(level, logEntry);
+      
+      // Ajouter à l'historique
+      this.logHistory.push(logEntry);
+      
+      // Limiter la taille de l'historique
+      if (this.logHistory.length > this.maxHistorySize) {
+        this.logHistory.shift();
       }
-
-      if (Logger.#config.enableStorage) {
-        Logger.#logToBuffer(logEntry);
+      
+      // Afficher dans la console
+      const prefix = this.prefixes[level] || this.prefixes.info;
+      const color = this.colors[level] || this.colors.info;
+      
+      const consoleArgs = [
+        `%c${prefix} [${module}] ${message}`,
+        color
+      ];
+      
+      if (Object.keys(data).length > 0) {
+        consoleArgs.push(data);
       }
+      
+      switch (level) {
+        case 'error':
+          console.error(...consoleArgs);
+          break;
+        case 'warn':
+          console.warn(...consoleArgs);
+          break;
+        default:
+          console.log(...consoleArgs);
+      }
+      
     } catch (err) {
-      try {
-        console.error('[Logger FALLBACK]', err.message);
-      } catch (_) {
-        // Abandon silencieux
-      }
+      console.error('Erreur dans Logger.log:', err);
     }
   }
-
+  
   /**
-   * Affichage console avec couleurs et données
+   * Log d'information
+   * @param {string} module - Nom du module
+   * @param {string} message - Message
+   * @param {object} data - Données additionnelles
    */
-  static #logToConsole(level, logEntry) {
+  info(module, message, data = {}) {
+    this.log(module, message, data, 'info');
+  }
+  
+  /**
+   * Log d'avertissement
+   * @param {string} module - Nom du module
+   * @param {string} message - Message
+   * @param {object} data - Données additionnelles
+   */
+  warn(module, message, data = {}) {
+    this.log(module, message, data, 'warn');
+  }
+  
+  /**
+   * Log d'erreur
+   * @param {string} module - Nom du module
+   * @param {string} message - Message
+   * @param {object} data - Données ou objet Error
+   */
+  error(module, message, data = {}) {
+    // Si data est un objet Error, extraire les infos utiles
+    if (data instanceof Error) {
+      data = {
+        message: data.message,
+        stack: data.stack,
+        name: data.name
+      };
+    }
+    
+    this.log(module, message, data, 'error');
+  }
+  
+  /**
+   * Log de succès
+   * @param {string} module - Nom du module
+   * @param {string} message - Message
+   * @param {object} data - Données additionnelles
+   */
+  success(module, message, data = {}) {
+    this.log(module, message, data, 'success');
+  }
+  
+  /**
+   * Log de debug (uniquement en mode développement)
+   * @param {string} module - Nom du module
+   * @param {string} message - Message
+   * @param {object} data - Données additionnelles
+   */
+  debug(module, message, data = {}) {
+    this.log(module, message, data, 'debug');
+  }
+  
+  /**
+   * Récupère l'historique des logs
+   * @param {string} level - Filtrer par niveau (optionnel)
+   * @param {string} module - Filtrer par module (optionnel)
+   * @returns {Array} Logs filtrés
+   */
+  getHistory(level = null, module = null) {
+    let history = [...this.logHistory];
+    
+    if (level) {
+      history = history.filter(log => log.level === level);
+    }
+    
+    if (module) {
+      history = history.filter(log => log.module === module);
+    }
+    
+    return history;
+  }
+  
+  /**
+   * Récupère les erreurs uniquement
+   * @returns {Array} Logs d'erreurs
+   */
+  getErrors() {
+    return this.getHistory('error');
+  }
+  
+  /**
+   * Efface l'historique
+   */
+  clearHistory() {
+    this.logHistory = [];
+    this.info('Logger', 'Historique effacé');
+  }
+  
+  /**
+   * Active/désactive le logger
+   * @param {boolean} enabled - true pour activer
+   */
+  setEnabled(enabled) {
+    this.enabled = enabled;
+    console.log(`Logger ${enabled ? 'activé' : 'désactivé'}`);
+  }
+  
+  /**
+   * Exporte les logs en format JSON
+   * @returns {string} Logs au format JSON
+   */
+  exportLogs() {
     try {
-      const style = `color: ${level.color}; font-weight: bold; font-family: monospace;`;
-      const dataStr = logEntry.data ? ` | Data: ${JSON.stringify(logEntry.data)}` : '';
-
-      console.log(
-        `%c${logEntry.formattedMessage}${dataStr}`,
-        style
-      );
-
-      if (level.value >= 3) {
-        console.trace('[Stack trace]');
-      }
+      return JSON.stringify(this.logHistory, null, 2);
     } catch (err) {
-      console.log(logEntry.formattedMessage, logEntry.data || '');
+      console.error('Erreur export logs:', err);
+      return null;
     }
   }
-
+  
   /**
-   * Stockage en mémoire (buffer)
+   * Télécharge les logs dans un fichier
    */
-  static #logToBuffer(logEntry) {
+  downloadLogs() {
     try {
-      Logger.#logBuffer.push(logEntry);
-
-      if (Logger.#logBuffer.length > Logger.#config.maxLogs) {
-        Logger.#logBuffer = Logger.#logBuffer.slice(-Logger.#config.maxLogs);
-      }
+      const logsJson = this.exportLogs();
+      if (!logsJson) return;
+      
+      const blob = new Blob([logsJson], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      
+      link.href = url;
+      link.download = `logs-${new Date().toISOString()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      this.success('Logger', 'Logs téléchargés');
+      
     } catch (err) {
-      // Fallback silencieux
+      this.error('Logger', 'Erreur téléchargement logs', err);
     }
-  }
-
-  /**
-   * Récupérer tous les logs en mémoire
-   */
-  static getLogs() {
-    try {
-      return [...Logger.#logBuffer];
-    } catch (_) {
-      return [];
-    }
-  }
-
-  /**
-   * Récupérer les logs formatés (string)
-   */
-  static getLogsFormatted() {
-    try {
-      return Logger.#logBuffer
-        .map(log => log.formattedMessage)
-        .join('\n');
-    } catch (_) {
-      return '';
-    }
-  }
-
-  /**
-   * Nettoyer les logs
-   */
-  static clearLogs() {
-    try {
-      Logger.#logBuffer = [];
-      Logger.info('Logger', 'Logs cleared');
-    } catch (_) {
-      console.log('[Logger] Logs cleared');
-    }
-  }
-
-  /**
-   * Exporter les logs (pour debugging)
-   */
-  static exportLogs() {
-    try {
-      return JSON.stringify(Logger.#logBuffer, null, 2);
-    } catch (_) {
-      return '[]';
-    }
-  }
-
-  /**
-   * Configurer le logger
-   */
-  static setConfig(options) {
-    try {
-      Logger.#config = { ...Logger.#config, ...options };
-      Logger.info('Logger', 'Configuration updated');
-    } catch (_) {
-      console.log('[Logger] Config update failed');
-    }
-  }
-
-  /**
-   * Vérifier si le logger est initialisé
-   */
-  static isInitialized() {
-    return Logger.#initialized;
   }
 }
 
-// Alias court pour usage rapide
-window.Log = Logger;
+// Créer une instance unique (singleton)
+const logger = new Logger();
 
-// Export pour modules ES6
-export { Logger };
-export default Logger;
+// Exporter l'instance
+export default logger;

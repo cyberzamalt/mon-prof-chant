@@ -1,733 +1,159 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <title>Mon Professeur de Chant - Application Modulaire</title>
-    
-    <style>
-        /* ========================================
-           RESET & VARIABLES
-        ======================================== */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        :root {
-            --color-primary: #166534;
-            --color-secondary: #00aaff;
-            --color-success: #00ff00;
-            --color-warning: #ffaa00;
-            --color-error: #ff0000;
-            --color-bg: #000000;
-            --color-surface: #1a1a1a;
-            --color-border: #333333;
-            --color-text: #ffffff;
-            --color-text-secondary: #aaaaaa;
-            --spacing-xs: 4px;
-            --spacing-sm: 8px;
-            --spacing-md: 16px;
-            --spacing-lg: 24px;
-            --spacing-xl: 32px;
-            --border-radius: 8px;
-            --font-primary: Arial, sans-serif;
-            --font-mono: 'Courier New', monospace;
-        }
-
-        /* ========================================
-           BASE STYLES
-        ======================================== */
-        body {
-            font-family: var(--font-primary);
-            background: var(--color-bg);
-            color: var(--color-text);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-
-        /* ========================================
-           HEADER
-        ======================================== */
-        .header {
-            background: var(--color-surface);
-            padding: var(--spacing-lg);
-            border-bottom: 2px solid var(--color-border);
-            text-align: center;
-        }
-
-        .header h1 {
-            font-size: 2rem;
-            margin-bottom: var(--spacing-sm);
-            color: var(--color-primary);
-        }
-
-        .header p {
-            color: var(--color-text-secondary);
-            font-size: 0.9rem;
-        }
-
-        /* ========================================
-           MAIN CONTENT
-        ======================================== */
-        .container {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            padding: var(--spacing-lg);
-            gap: var(--spacing-lg);
-            max-width: 1400px;
-            margin: 0 auto;
-            width: 100%;
-        }
-
-        /* ========================================
-           CONTROLS BAR
-        ======================================== */
-        .controls-bar {
-            background: var(--color-surface);
-            padding: var(--spacing-md);
-            border-radius: var(--border-radius);
-            border: 1px solid var(--color-border);
-            display: flex;
-            gap: var(--spacing-md);
-            flex-wrap: wrap;
-            align-items: center;
-        }
-
-        .btn {
-            padding: var(--spacing-sm) var(--spacing-lg);
-            border: none;
-            border-radius: var(--border-radius);
-            font-size: 1rem;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            font-family: var(--font-primary);
-        }
-
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .btn-primary {
-            background: var(--color-primary);
-            color: var(--color-bg);
-        }
-
-        .btn-primary:hover:not(:disabled) {
-            background: #00dd00;
-            box-shadow: 0 0 20px var(--color-primary);
-        }
-
-        .btn-secondary {
-            background: var(--color-secondary);
-            color: var(--color-bg);
-        }
-
-        .btn-secondary:hover:not(:disabled) {
-            background: #0099dd;
-        }
-
-        .btn-danger {
-            background: var(--color-error);
-            color: var(--color-text);
-        }
-
-        .btn-danger:hover:not(:disabled) {
-            background: #dd0000;
-        }
-
-        .control-group {
-            display: flex;
-            align-items: center;
-            gap: var(--spacing-sm);
-        }
-
-        .control-group label {
-            color: var(--color-text-secondary);
-            font-size: 0.9rem;
-        }
-
-        .control-group select {
-            padding: var(--spacing-sm);
-            background: var(--color-bg);
-            color: var(--color-text);
-            border: 1px solid var(--color-border);
-            border-radius: var(--border-radius);
-            font-family: var(--font-primary);
-        }
-
-        /* ========================================
-           PANELS
-        ======================================== */
-        .panels-container {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: var(--spacing-lg);
-        }
-
-        @media (min-width: 768px) {
-            .panels-container {
-                grid-template-columns: 1fr 1fr;
-            }
-        }
-
-        .panel {
-            background: var(--color-surface);
-            border: 2px solid var(--color-border);
-            border-radius: var(--border-radius);
-            padding: var(--spacing-md);
-            display: flex;
-            flex-direction: column;
-            gap: var(--spacing-md);
-        }
-
-        .panel-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-bottom: var(--spacing-sm);
-            border-bottom: 1px solid var(--color-border);
-        }
-
-        .panel-title {
-            font-size: 1.2rem;
-            font-weight: bold;
-            display: flex;
-            align-items: center;
-            gap: var(--spacing-sm);
-        }
-
-        .panel-status {
-            font-size: 0.85rem;
-            padding: var(--spacing-xs) var(--spacing-sm);
-            border-radius: 4px;
-            background: var(--color-bg);
-        }
-
-        .status-active {
-            color: var(--color-success);
-        }
-
-        .status-inactive {
-            color: var(--color-text-secondary);
-        }
-
-        .panel-canvas {
-            width: 100%;
-            height: 300px;
-            background: var(--color-bg);
-            border: 1px solid var(--color-border);
-            border-radius: var(--border-radius);
-            display: block;
-        }
-
-        .panel-info {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: var(--spacing-sm);
-        }
-
-        .info-item {
-            background: var(--color-bg);
-            padding: var(--spacing-sm);
-            border-radius: 4px;
-            text-align: center;
-        }
-
-        .info-label {
-            font-size: 0.75rem;
-            color: var(--color-text-secondary);
-            margin-bottom: var(--spacing-xs);
-            text-transform: uppercase;
-        }
-
-        .info-value {
-            font-size: 1.2rem;
-            font-weight: bold;
-            font-family: var(--font-mono);
-        }
-
-        /* ========================================
-           NOTIFICATIONS
-        ======================================== */
-        .notification {
-            position: fixed;
-            top: var(--spacing-lg);
-            right: var(--spacing-lg);
-            background: var(--color-surface);
-            border: 2px solid var(--color-border);
-            border-radius: var(--border-radius);
-            padding: var(--spacing-md);
-            max-width: 400px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-            animation: slideIn 0.3s ease;
-            z-index: 1000;
-            display: none;
-        }
-
-        .notification.show {
-            display: block;
-        }
-
-        .notification.success {
-            border-color: var(--color-success);
-        }
-
-        .notification.error {
-            border-color: var(--color-error);
-        }
-
-        .notification.warning {
-            border-color: var(--color-warning);
-        }
-
-        @keyframes slideIn {
-            from {
-                transform: translateX(400px);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-
-        /* ========================================
-           FOOTER
-        ======================================== */
-        .footer {
-            background: var(--color-surface);
-            padding: var(--spacing-md);
-            border-top: 1px solid var(--color-border);
-            text-align: center;
-            color: var(--color-text-secondary);
-            font-size: 0.85rem;
-        }
-
-        /* ========================================
-           LOADING OVERLAY
-        ======================================== */
-        .loading-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.9);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            gap: var(--spacing-lg);
-            z-index: 9999;
-        }
-
-        .loading-overlay.hidden {
-            display: none;
-        }
-
-        .spinner {
-            width: 50px;
-            height: 50px;
-            border: 4px solid var(--color-border);
-            border-top-color: var(--color-primary);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .loading-text {
-            color: var(--color-text);
-            font-size: 1.2rem;
-        }
-
-        /* ========================================
-           RESPONSIVE
-        ======================================== */
-        @media (max-width: 767px) {
-            .header h1 {
-                font-size: 1.5rem;
-            }
-
-            .controls-bar {
-                flex-direction: column;
-            }
-
-            .btn {
-                width: 100%;
-            }
-
-            .panel-info {
-                grid-template-columns: 1fr;
-            }
-
-            .notification {
-                left: var(--spacing-sm);
-                right: var(--spacing-sm);
-                max-width: none;
-            }
-        }
-    </style>
-<!-- Override thème (vert foncé + masquage bloc arbo debug) --> <style> :root{ /* remplace l’ancien vert fluo */ --ok: #166534; /* green-800 */ } /* Si ton bouton a une classe spécifique, on renforce l’override sans casser le thème */ #btnStart, .btn-start, [data-role="start"]{ background: var(--ok) !important; border-color: var(--ok) !important; } /* Masque le résumé d'architecture en bas de page s'il est présent */ #arch-summary, #repo-structure, .repo-structure, footer.debug-arch { display: none !important; } 
-</style> 
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Mon Professeur de Chant – v2</title>
+  <style>
+    :root{
+      --bg:#0b0f16; --panel:#111726; --card:#121a2b; --grid:#1a2742;
+      --text:#e6e8ee; --muted:#9aa3b2; --ok:#166534; --danger:#d33; --accent:#3b82f6;
+      --bd:#263347; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    }
+    *{box-sizing:border-box} html,body{height:100%;margin:0}
+    body{background:var(--bg); color:var(--text); font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif}
+    header{padding:18px 20px; text-align:center; border-bottom:1px solid var(--bd); background:var(--panel)}
+    h1{margin:0; font-size:22px; color:#37d770}
+    main{max-width:1200px;margin:24px auto; padding:0 16px}
+    .bar{display:flex; gap:10px; flex-wrap:wrap; align-items:center; background:var(--panel); border:1px solid var(--bd); padding:12px; border-radius:12px}
+    .btn{border:1px solid transparent; border-radius:10px; padding:10px 14px; font-weight:600; cursor:pointer}
+    .btn:disabled{opacity:.6; cursor:not-allowed}
+    .b-ok{background:var(--ok); color:#fff}
+    .b-stop{background:var(--danger); color:#fff}
+    .b-sec{background:#21304a; color:#dfe7f6; border-color:#2a3a58}
+    .b-ghost{background:transparent; color:#c9d4e8; border-color:#3a4a66}
+    .grid{display:grid; gap:18px}
+    @media(min-width:900px){ .grid{grid-template-columns:1fr 1fr} }
+    .panel{background:var(--panel); border:1px solid var(--bd); border-radius:14px; padding:14px}
+    .ph{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px}
+    .ph h3{margin:0; font-size:15px}
+    .status{font-size:12px; color:#9fb0c9}
+    canvas{display:block; width:100%; height:360px; background:#05080f; border:1px solid var(--bd); border-radius:10px}
+    .info{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px}
+    .infobox{background:#0d1422; border:1px solid var(--bd); border-radius:8px; padding:8px; text-align:center}
+    .lbl{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em}
+    .val{font-family:var(--mono); font-weight:700}
+    .note{margin-top:6px; color:var(--muted); font-size:12px}
+    .toast{position:fixed; right:16px; top:16px; background:#0d1422; border:1px solid var(--bd); padding:12px 14px; border-radius:10px; display:none}
+    .toast.show{display:block}
+  </style>
 </head>
 <body>
-    <!-- ========================================
-         LOADING OVERLAY
-    ======================================== -->
-    <div id="loading-overlay" class="loading-overlay">
-        <div class="spinner"></div>
-        <div class="loading-text">Chargement de l'application...</div>
+  <header>
+    <h1>🎤 Mon Professeur de Chant</h1>
+    <div class="note">Analyse vocale en temps réel • v2 clean</div>
+  </header>
+
+  <main>
+    <div class="bar">
+      <button id="btnStart" class="btn b-ok" onclick="handleStart()">▶️ Démarrer</button>
+      <button id="btnStop" class="btn b-stop" onclick="handleStop()" disabled>⏹️ Arrêter</button>
+      <button id="btnRec" class="btn b-sec" onclick="handleRecord()" disabled>⏺️ Enregistrer</button>
+      <button class="btn b-ghost" onclick="handleClear()">🗑️ Effacer</button>
+      <span class="note" id="statusMsg">Prêt.</span>
     </div>
 
-    <!-- ========================================
-         NOTIFICATION
-    ======================================== -->
-    <div id="notification" class="notification"></div>
-
-    <!-- ========================================
-         HEADER
-    ======================================== -->
-    <header class="header">
-        <h1>🎤 Mon Professeur de Chant</h1>
-        <p>Application modulaire d'analyse vocale en temps réel</p>
-    </header>
-
-    <!-- ========================================
-         MAIN CONTENT
-    ======================================== -->
-    <main class="container">
-        <!-- CONTROLS BAR -->
-        <div class="controls-bar">
-            <button id="btn-start" class="btn btn-primary" onclick="handleStart()">
-                ▶️ Démarrer
-            </button>
-            <button id="btn-stop" class="btn btn-danger" onclick="handleStop()" disabled>
-                ⏹️ Arrêter
-            </button>
-            <button id="btn-record" class="btn btn-secondary" onclick="handleRecord()" disabled>
-                ⏺️ Enregistrer
-            </button>
-            <button id="btn-clear" class="btn btn-secondary" onclick="handleClear()">
-                🗑️ Effacer
-            </button>
-
-            <div class="control-group">
-                <label for="mode-select">Mode:</label>
-                <select id="mode-select" data-control="mode" onchange="handleModeChange(this.value)">
-                    <option value="A440" selected>La 440 (centré)</option>
-                    <option value="absolute">Absolu</option>
-                    <option value="auto">Auto-tune</option>
-                </select>
-            </div>
+    <div class="grid">
+      <section class="panel" id="panel-recording">
+        <div class="ph">
+          <h3>Enregistrement Live</h3>
+          <button class="btn b-ghost" id="dlLive" onclick="downloadLive()" disabled>⬇️ Télécharger MP3</button>
         </div>
-
-        <!-- PANELS -->
-        <div class="panels-container">
-            <!-- PANEL RECORDING -->
-            <div id="panel-recording" class="panel">
-                <div class="panel-header">
-                    <div class="panel-title">
-                        🎤 Enregistrement Live
-                    </div>
-                    <div id="status-recording" class="panel-status status-inactive" data-display="status">
-                        Inactif
-                    </div>
-                </div>
-
-                <canvas id="canvas-recording" class="panel-canvas" width="600" height="300"></canvas>
-
-                <div class="panel-info">
-                    <div class="info-item">
-                        <div class="info-label">Fréquence</div>
-                        <div id="freq-recording" class="info-value" data-display="frequency">---</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">Note</div>
-                        <div id="note-recording" class="info-value" data-display="note">---</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">Cents</div>
-                        <div id="cents-recording" class="info-value" data-display="cents">---</div>
-                    </div>
-                </div>
-
-                <div style="display: none;">
-                    <button data-action="start">Start</button>
-                    <button data-action="stop">Stop</button>
-                    <button data-action="clear">Clear</button>
-                </div>
-            </div>
-
-            <!-- PANEL REFERENCE (Optionnel) -->
-            <div id="panel-reference" class="panel">
-                <div class="panel-header">
-                    <div class="panel-title">
-                        🎵 Référence Audio
-                    </div>
-                    <div id="status-reference" class="panel-status status-inactive" data-display="status">
-                        Inactif
-                    </div>
-                </div>
-
-                <canvas id="canvas-reference" class="panel-canvas" width="600" height="300"></canvas>
-
-                <div class="panel-info">
-                    <div class="info-item">
-                        <div class="info-label">Fréquence</div>
-                        <div id="freq-reference" class="info-value" data-display="frequency">---</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">Note</div>
-                        <div id="note-reference" class="info-value" data-display="note">---</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">Cents</div>
-                        <div id="cents-reference" class="info-value" data-display="cents">---</div>
-                    </div>
-                </div>
-
-                <div style="display: none;">
-                    <button data-action="start">Start</button>
-                    <button data-action="stop">Stop</button>
-                    <button data-action="clear">Clear</button>
-                </div>
-            </div>
+        <canvas id="canvas-recording" width="1200" height="360"></canvas>
+        <div class="info">
+          <div class="infobox"><div class="lbl">Fréquence</div><div class="val" id="freq-recording">—</div></div>
+          <div class="infobox"><div class="lbl">Note</div><div class="val" id="note-recording">—</div></div>
+          <div class="infobox"><div class="lbl">Cents</div><div class="val" id="cents-recording">—</div></div>
         </div>
-    </main>
+      </section>
 
-    <!-- ========================================
-         FOOTER
-    ======================================== -->
-    <footer class="footer">
-        <p>Mon Professeur de Chant - Architecture Modulaire v2.0 | © 2025 Nicolas Abriou (cyberzamalt)</p>
-    </footer>
+      <section class="panel" id="panel-reference">
+        <div class="ph">
+          <h3>Référence Audio</h3>
+          <button class="btn b-ghost" id="dlRef" onclick="downloadRef()" disabled>⬇️ Télécharger MP3</button>
+        </div>
+        <canvas id="canvas-reference" width="1200" height="360"></canvas>
+        <div class="info">
+          <div class="infobox"><div class="lbl">Fréquence</div><div class="val" id="freq-reference">—</div></div>
+          <div class="infobox"><div class="lbl">Note</div><div class="val" id="note-reference">—</div></div>
+          <div class="infobox"><div class="lbl">Cents</div><div class="val" id="cents-reference">—</div></div>
+        </div>
+      </section>
+    </div>
+  </main>
 
-    <!-- ========================================
-         SCRIPTS EXTERNES (Ordre important!)
-    ======================================== -->
-    
-    <!-- 1. YIN Detector -->
-    <script src="src/vendor/yin-detector.js"></script>
-    
-    <!-- 2. Pitch Smoother -->
-    <script src="src/utils/pitch-smoothing.js"></script>
-    
-    <!-- 3. LAME (pour export MP3 - optionnel) -->
-    <script src="src/vendor/lame.min.js"></script>
+  <div id="toast" class="toast"></div>
 
-    <!-- ========================================
-         APPLICATION PRINCIPALE (ES6 Module)
-    ======================================== -->
-    <script type="module">
-        import app from './src/app.js';
+  <!-- Dépendances externes requises -->
+  <script src="src/vendor/yin-detector.js"></script>
+  <script src="src/utils/pitch-smoothing.js"></script>
+  <script src="src/vendor/lame.min.js"></script>
 
-        // Exposer l'app globalement pour les handlers onclick
-        window.appInstance = app;
+  <!-- App v2 -->
+  <script type="module">
+    import app from './src/app.js';
+    window.appInstance = app;
 
-        // Masquer le loading overlay une fois chargé
-        document.addEventListener('DOMContentLoaded', () => {
-            // L'app s'initialise automatiquement via app.js
-            // Attendre un peu puis masquer le loading
-            setTimeout(() => {
-                const overlay = document.getElementById('loading-overlay');
-                if (overlay) {
-                    overlay.classList.add('hidden');
-                }
-            }, 1000);
-        });
+    const T = (msg, type='info')=>{
+      const el = document.getElementById('toast');
+      el.className = 'toast show';
+      el.textContent = msg;
+      setTimeout(()=>el.classList.remove('show'), 2200);
+    };
 
-        // Écouter l'événement app:initialized
-        window.addEventListener('load', () => {
-            if (app.isInitialized()) {
-                console.log('✅ Application prête!');
-            }
-        });
-    </script>
+    window.handleStart = async ()=>{
+      try{
+        await app.start();
+        document.getElementById('btnStart').disabled = true;
+        document.getElementById('btnStop').disabled = false;
+        document.getElementById('btnRec').disabled = false;
+        T('Micro démarré.'); 
+      }catch(e){ T('Erreur: '+(e?.message||e), 'err'); }
+    };
 
-    <!-- ========================================
-         HANDLERS UI (Fonctions globales)
-    ======================================== -->
-    <script>
-        /**
-         * Démarrer l'application
-         */
-        async function handleStart() {
-            try {
-                const app = window.appInstance;
-                if (!app) {
-                    throw new Error('App non chargée');
-                }
+    window.handleStop = ()=>{
+      app.stop();
+      document.getElementById('btnStart').disabled = false;
+      document.getElementById('btnStop').disabled = true;
+      document.getElementById('btnRec').disabled = true;
+      T('Arrêté.');
+    };
 
-                console.log('Démarrage...');
-                
-                // Démarrer l'app (initialise AudioContext + Microphone)
-                await app.start();
+    window.handleRecord = async ()=>{
+      try{
+        const started = await app.toggleRecord(); // start/stop
+        document.getElementById('btnRec').textContent = started ? '⏹️ Arrêter Enreg.' : '⏺️ Enregistrer';
+        document.getElementById('dlLive').disabled = !app.hasRecording();
+        T(started?'Enregistrement démarré.':'Enregistrement arrêté.');
+      }catch(e){ T('Erreur: '+(e?.message||e), 'err'); }
+    };
 
-                // Démarrer le panneau recording
-                const recordingPanel = app.getPanel('recording');
-                if (recordingPanel) {
-                    recordingPanel.start();
-                }
+    window.handleClear = ()=>{
+      app.clearPanels();
+      T('Tracés effacés.');
+    };
 
-                // Mettre à jour les boutons
-                document.getElementById('btn-start').disabled = true;
-                document.getElementById('btn-stop').disabled = false;
-                document.getElementById('btn-record').disabled = false;
+    window.downloadLive = async ()=>{
+      const file = await app.getLastMp3('live');
+      if(!file) return T('Aucun enregistrement.');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(file.blob);
+      a.download = file.name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      T('MP3 téléchargé.');
+    };
 
-                showNotification('success', '✅ Application démarrée avec succès!');
-
-            } catch (err) {
-                console.error('Erreur handleStart:', err);
-                showNotification('error', `❌ Erreur: ${err.message}`);
-            }
-        }
-
-        /**
-         * Arrêter l'application
-         */
-        function handleStop() {
-            try {
-                const app = window.appInstance;
-                if (!app) return;
-
-                console.log('Arrêt...');
-                app.stop();
-
-                // Mettre à jour les boutons
-                document.getElementById('btn-start').disabled = false;
-                document.getElementById('btn-stop').disabled = true;
-                document.getElementById('btn-record').disabled = true;
-
-                showNotification('info', 'ℹ️ Application arrêtée');
-
-            } catch (err) {
-                console.error('Erreur handleStop:', err);
-                showNotification('error', `❌ Erreur: ${err.message}`);
-            }
-        }
-
-        /**
-         * Démarrer/arrêter l'enregistrement
-         */
-        async function handleRecord() {
-            try {
-                const app = window.appInstance;
-                if (!app) return;
-
-                const recordingService = app.getService('recording');
-                if (!recordingService) {
-                    throw new Error('RecordingService non disponible');
-                }
-
-                const btn = document.getElementById('btn-record');
-
-                if (recordingService.isRecording()) {
-                    // Arrêter l'enregistrement
-                    const data = await recordingService.stop();
-                    btn.textContent = '⏺️ Enregistrer';
-                    showNotification('success', `✅ Enregistrement arrêté (${(data.duration / 1000).toFixed(1)}s)`);
-                } else {
-                    // Démarrer l'enregistrement
-                    await recordingService.start();
-                    btn.textContent = '⏹️ Arrêter Enreg.';
-                    showNotification('success', '⏺️ Enregistrement démarré');
-                }
-
-            } catch (err) {
-                console.error('Erreur handleRecord:', err);
-                showNotification('error', `❌ Erreur: ${err.message}`);
-            }
-        }
-
-        /**
-         * Effacer les visualisations
-         */
-        function handleClear() {
-            try {
-                const app = window.appInstance;
-                if (!app) return;
-
-                const recordingPanel = app.getPanel('recording');
-                if (recordingPanel) {
-                    recordingPanel.clear();
-                }
-
-                const referencePanel = app.getPanel('reference');
-                if (referencePanel) {
-                    referencePanel.clear();
-                }
-
-                showNotification('info', '🗑️ Visualisations effacées');
-
-            } catch (err) {
-                console.error('Erreur handleClear:', err);
-            }
-        }
-
-        /**
-         * Changer le mode de visualisation
-         */
-        function handleModeChange(mode) {
-            try {
-                const app = window.appInstance;
-                if (!app) return;
-
-                const recordingPanel = app.getPanel('recording');
-                if (recordingPanel) {
-                    recordingPanel.setMode(mode);
-                }
-
-                const referencePanel = app.getPanel('reference');
-                if (referencePanel) {
-                    referencePanel.setMode(mode);
-                }
-
-                console.log(`Mode changé: ${mode}`);
-                showNotification('info', `📊 Mode: ${mode}`);
-
-            } catch (err) {
-                console.error('Erreur handleModeChange:', err);
-            }
-        }
-
-        /**
-         * Afficher une notification
-         */
-        function showNotification(type, message) {
-            const notification = document.getElementById('notification');
-            if (!notification) return;
-
-            notification.className = `notification ${type} show`;
-            notification.textContent = message;
-
-            // Auto-hide après 3 secondes
-            setTimeout(() => {
-                notification.classList.remove('show');
-            }, 3000);
-        }
-
-        /**
-         * Gestion des erreurs globales
-         */
-        window.addEventListener('error', (event) => {
-            console.error('Erreur globale:', event.error);
-            showNotification('error', `❌ Erreur: ${event.error?.message || 'Erreur inconnue'}`);
-        });
-
-        window.addEventListener('unhandledrejection', (event) => {
-            console.error('Promise rejetée:', event.reason);
-            showNotification('error', `❌ Erreur: ${event.reason?.message || 'Erreur inconnue'}`);
-        });
-    </script>
+    window.downloadRef = async ()=>{
+      const file = await app.getLastMp3('ref');
+      if(!file) return T('Aucune référence.');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(file.blob);
+      a.download = file.name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      T('MP3 référence téléchargé.');
+    };
+  </script>
 </body>
 </html>

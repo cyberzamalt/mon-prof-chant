@@ -2,7 +2,7 @@
 // Version unifiée : utilise TOUJOURS le même AudioContext que l’app (AudioEngine)
 
 import { Logger } from '../../logging/Logger.js';
-import { audioEngine } from './AudioEngine.js';
+import { AudioEngine } from './AudioEngine.js';
 
 class MicrophoneManager {
   constructor(options = {}) {
@@ -12,7 +12,7 @@ class MicrophoneManager {
         echoCancellation: false,
         noiseSuppression: false,
         autoGainControl: false,
-        // sampleRate: 48000, // ← décommente si tu veux tenter de forcer 48 kHz
+        // sampleRate: 48000, // ← décommente si tu veux tenter 48 kHz
       }
     };
     this.stream = null;
@@ -23,16 +23,15 @@ class MicrophoneManager {
     try {
       Logger.info('[MicrophoneManager] Demande accès microphone...', this.constraints);
 
-      // 🔒 Un seul AudioContext partagé dans toute l’app
-      const ctx = audioEngine.context;
+      // 🔒 Un seul AudioContext partagé via AudioEngine
+      const ctx = AudioEngine.getInstance().context;
 
-      // getUserMedia selon les contraintes
       const stream = await navigator.mediaDevices.getUserMedia(this.constraints);
       this.stream = stream;
 
       Logger.info('[MicrophoneManager] Accès microphone accordé (contraintes complètes)');
 
-      // IMPORTANT : créer la source DANS LE MÊME CONTEXTE que le reste
+      // IMPORTANT : créer la source DANS LE MÊME CONTEXTE
       this.source = new MediaStreamAudioSourceNode(ctx, { mediaStream: stream });
 
       Logger.info('[MicrophoneManager] Source créée', {
@@ -80,6 +79,6 @@ class MicrophoneManager {
   }
 }
 
-// ✅ Compatibilité : export par défaut ET export nommé
+// ✅ Compat : export par défaut + export nommé
 export default MicrophoneManager;
 export { MicrophoneManager };

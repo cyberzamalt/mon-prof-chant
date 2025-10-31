@@ -1,574 +1,236 @@
-/**
- * SinusoidalRenderer.js
- * Moteur de rendu de la courbe sinusoïdale
- * 
- * Responsabilités:
- * - Dessiner la courbe sinusoïdale lissée en temps réel
- * - Interpolation Catmull-Rom pour fluidité
- * - 3 modes: Absolu, A440 (centré), Auto
- * - Grille de référence et axes
- * - Animation fluide 60 FPS
- * 
- * CRITIQUE: Ce code vient du monolithe fonctionnel
- * Les paramètres sont optimisés et validés
- */
-
+// src/visualization/renderers/SinusoidalRenderer.js
+// Oscilloscope persistant + axes (temps & niveau "grave → aigu")
 import { Logger } from '../../logging/Logger.js';
 
 export class SinusoidalRenderer {
-  #canvas = null;
-  #ctx = null;
-  #width = 0;
-  #height = 0;
-  #centerY = 0;
-  #points = [];
-  #maxPoints = 300;
-  #mode = 'A440'; // 'absolute', 'A440', 'auto'
-  #referenceFreq = 440;
-  #config = null;
-  #animationId = null;
-  #isRunning = false;
+  constructor(canvas, { audioEngine, microphone, persistent = true } = {}) {
+    this.canvas = typeof canvas === 'string' ? document.getElementById(canvas) : canvas;
+    this.ctx = this.canvas.getContext('2d');
 
-  /**
-   * Constructeur
-   * @param {HTMLCanvasElement} canvas - Élément canvas
-   * @param {Object} config - Configuration du rendu
-   */
-  constructor(canvas, config = {}) {
+    this.audioEngine = audioEngine;
+    this.microphone = microphone;
+
+    this.persistent = persistent;
+    this.running = false;
+
+    this.analyser = null;
+    this.timeData = null;
+
+    // Mise en page
+    this.margin = { left: 64, right: 16, top: 16, bottom: 40 };
+    this.plotW = this.canvas.width - this.margin.left - this.margin.right;
+    this.plotH = this.canvas.height - this.margin.top - this.margin.bottom;
+
+    // Curseur horizontal (avance jusqu'au bord droit puis s'arrête si persistent=true)
+    this.x = 0;
+
+    // Pré-rendu axes
+    this.axesLayer = document.createElement('canvas');
+    this.axesLayer.width = this.canvas.width;
+    this.axesLayer.height = this.canvas.height;
+    this.axesCtx = this.axesLayer.getContext('2d');
+
+    this._drawAxes();
+
+    // Style
+    this.waveColor = '#31c48d'; // vert lisible (pas fluo)
+    this.gridColor = 'rgba(255,255,255,0.10)';
+    this.textColor = 'rgba(255,255,255,0.85)';
+    this.zeroColor = 'rgba(255,255,255,0.30)';
+  }
+
+  _px(x, y) {
+    return {
+      x: this.margin.left + x,
+      y: this.margin.top + y
+    };
+  }
+
+  _drawAxes() {
+    const g = this.axesCtx;
+    const { width, height } = this.canvas;
+
+    g.clearRect(0, 0, width, height);
+
+    // Fond surface
+    g.fillStyle = 'rgba(0,0,0,0.85)';
+    g.fillRect(0, 0, width, height);
+
+    // Cadre
+    g.strokeStyle = this.gridColor;
+    g.lineWidth = 1;
+    g.strokeRect(this.margin.left, this.margin.top, this.plotW, this.plotH);
+
+    // Lignes horizontales (échelle “grave → aigu”)
+    const bands = [
+      'Très très grave', 'Très grave', 'Grave', 'Peu grave',
+      'Moyen', 'Peu aigu', 'Aigu', 'Très aigu', 'Très très aigu'
+    ];
+    g.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+    g.fillStyle = this.textColor;
+    g.textBaseline = 'middle';
+
+    for (let i = 0; i < bands.length; i++) {
+      const yRel = i / (bands.length - 1);                    // 0..1
+      const y = this.margin.top + (1 - yRel) * this.plotH;    // haut=aigu, bas=grave
+      g.strokeStyle = this.gridColor;
+      g.beginPath();
+      g.moveTo(this.margin.left, y);
+      g.lineTo(this.margin.left + this.plotW, y);
+      g.stroke();
+
+      g.fillText(bands[i], 8, y);
+    }
+
+    // Axe temps (ticks 0,1,2,3… sec — on écrira les valeurs depuis le renderer)
+    g.fillStyle = this.textColor;
+    g.textBaseline = 'top';
+    g.fillText('temps (s)', this.margin.left, height - this.margin.bottom + 14);
+
+    // Ligne zéro (milieu vertical)
+    g.strokeStyle = this.zeroColor;
+    g.beginPath();
+    const zeroY = this.margin.top + this.plotH / 2;
+    g.moveTo(this.margin.left, zeroY);
+    g.lineTo(this.margin.left + this.plotW, zeroY);
+    g.stroke();
+  }
+
+  connectToMicrophone() {
+    // Utilise le même AudioContext que l’app
+    const ctx = this.audioEngine?.context;
+    const src = this.microphone?.source;
+
+    if (!ctx || !src) {
+      Logger.warn('[SinusoidalRenderer] Micro/AudioEngine manquants → connexion différée');
+      return false;
+    }
+
+    // Un Analyser dédié pour le scope
+    this.analyser = new AnalyserNode(ctx, { fftSize: 2048 });
+    this.timeData = new Float32Array(this.analyser.fftSize);
     try {
-      if (!canvas || !(canvas instanceof HTMLCanvasElement)) {
-        throw new Error('[SinusoidalRenderer] Canvas HTML requis');
-      }
-
-      this.#canvas = canvas;
-      this.#ctx = canvas.getContext('2d');
-
-      if (!this.#ctx) {
-        throw new Error('[SinusoidalRenderer] Impossible d\'obtenir contexte 2D');
-      }
-
-      // Configuration par défaut
-      this.#config = {
-        // Courbe
-        lineWidth: 3,
-        lineColor: '#00ff00',
-        shadowBlur: 10,
-        shadowColor: '#00ff00',
-        
-        // Grille
-        showGrid: true,
-        gridColor: 'rgba(255, 255, 255, 0.1)',
-        gridLineWidth: 1,
-        
-        // Axes
-        showAxes: true,
-        axisColor: 'rgba(255, 255, 255, 0.3)',
-        axisLineWidth: 2,
-        
-        // Plage Y (Hz)
-        minFreq: 60,
-        maxFreq: 1200,
-        
-        // Interpolation
-        tension: 0.5, // Catmull-Rom tension (0-1)
-        
-        ...config
-      };
-
-      this.#resize();
-      this.#setupResizeObserver();
-
-      Logger.info('SinusoidalRenderer', 'Initialisé', {
-        width: this.#width,
-        height: this.#height,
-        mode: this.#mode
-      });
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur constructeur', err);
-      throw err;
+      src.connect(this.analyser);
+      Logger.info('[SinusoidalRenderer] Analyser connecté au micro');
+      return true;
+    } catch (e) {
+      Logger.error('[SinusoidalRenderer] Connexion Analyser échouée', e);
+      return false;
     }
   }
 
-  /**
-   * Redimensionner le canvas
-   * @private
-   */
-  #resize() {
-    try {
-      // Obtenir dimensions réelles
-      const rect = this.#canvas.getBoundingClientRect();
-      
-      // Définir résolution canvas (2x pour haute densité)
-      const dpr = window.devicePixelRatio || 1;
-      this.#width = rect.width * dpr;
-      this.#height = rect.height * dpr;
-      
-      this.#canvas.width = this.#width;
-      this.#canvas.height = this.#height;
-      
-      // Échelle du contexte
-      this.#ctx.scale(dpr, dpr);
-      
-      // Centre vertical
-      this.#centerY = rect.height / 2;
-
-      Logger.debug('SinusoidalRenderer', 'Canvas redimensionné', {
-        width: this.#width,
-        height: this.#height,
-        dpr: dpr
-      });
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur resize', err);
-    }
-  }
-
-  /**
-   * Observer les changements de taille
-   * @private
-   */
-  #setupResizeObserver() {
-    try {
-      if (!window.ResizeObserver) {
-        Logger.warn('SinusoidalRenderer', 'ResizeObserver non supporté');
-        return;
-      }
-
-      const observer = new ResizeObserver(() => {
-        this.#resize();
-        this.#render(); // Re-render après resize
-      });
-
-      observer.observe(this.#canvas);
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur setupResizeObserver', err);
-    }
-  }
-
-  /**
-   * Définir le mode de rendu
-   * @param {string} mode - 'absolute', 'A440', 'auto'
-   */
-  setMode(mode) {
-    try {
-      const validModes = ['absolute', 'A440', 'auto'];
-      if (!validModes.includes(mode)) {
-        throw new Error(`Mode invalide: ${mode}`);
-      }
-
-      this.#mode = mode;
-      Logger.info('SinusoidalRenderer', `Mode changé: ${mode}`);
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur setMode', err);
-    }
-  }
-
-  /**
-   * Ajouter un point de données
-   * @param {number} frequency - Fréquence en Hz
-   * @param {Object} metadata - Métadonnées optionnelles
-   */
-  addPoint(frequency, metadata = {}) {
-    try {
-      if (typeof frequency !== 'number' || frequency <= 0) {
-        Logger.warn('SinusoidalRenderer', 'Fréquence invalide', frequency);
-        return;
-      }
-
-      // Calculer Y en fonction du mode
-      const y = this.#frequencyToY(frequency);
-
-      // Valider Y
-      if (!isFinite(y)) {
-        Logger.warn('SinusoidalRenderer', 'Y non fini', { frequency, y });
-        return;
-      }
-
-      // Ajouter le point
-      this.#points.push({
-        y: y,
-        frequency: frequency,
-        timestamp: Date.now(),
-        ...metadata
-      });
-
-      // Limiter le nombre de points
-      if (this.#points.length > this.#maxPoints) {
-        this.#points.shift();
-      }
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur addPoint', err);
-    }
-  }
-
-  /**
-   * Convertir fréquence en coordonnée Y
-   * @private
-   * @param {number} frequency - Fréquence en Hz
-   * @returns {number} Coordonnée Y
-   */
-  #frequencyToY(frequency) {
-    try {
-      const rect = this.#canvas.getBoundingClientRect();
-      const height = rect.height;
-
-      switch (this.#mode) {
-        case 'absolute':
-          // Mode absolu: mapper linéairement la plage
-          const range = this.#config.maxFreq - this.#config.minFreq;
-          const normalized = (frequency - this.#config.minFreq) / range;
-          return height - (normalized * height); // Inverser Y
-
-        case 'A440':
-          // Mode A440: centrer autour de la référence
-          const deviation = frequency - this.#referenceFreq;
-          const scale = height / 400; // ±200 Hz visible
-          return this.#centerY - (deviation * scale);
-
-        case 'auto':
-          // Mode auto: ajustement dynamique
-          // TODO: Implémenter ajustement automatique
-          return this.#centerY;
-
-        default:
-          return this.#centerY;
-      }
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur frequencyToY', err);
-      return this.#centerY;
-    }
-  }
-
-  /**
-   * Boucle de rendu
-   * @private
-   */
-  #render() {
-    try {
-      if (!this.#isRunning) {
-        return;
-      }
-
-      // Effacer le canvas
-      this.#clear();
-
-      // Dessiner la grille
-      if (this.#config.showGrid) {
-        this.#drawGrid();
-      }
-
-      // Dessiner les axes
-      if (this.#config.showAxes) {
-        this.#drawAxes();
-      }
-
-      // Dessiner la courbe
-      if (this.#points.length > 1) {
-        this.#drawCurve();
-      }
-
-      // Stats de debug
-      this.#drawStats();
-
-      // Prochaine frame
-      this.#animationId = requestAnimationFrame(() => this.#render());
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur render', err);
-    }
-  }
-
-  /**
-   * Effacer le canvas
-   * @private
-   */
-  #clear() {
-    const rect = this.#canvas.getBoundingClientRect();
-    this.#ctx.fillStyle = '#000000';
-    this.#ctx.fillRect(0, 0, rect.width, rect.height);
-  }
-
-  /**
-   * Dessiner la grille de référence
-   * @private
-   */
-  #drawGrid() {
-    try {
-      const rect = this.#canvas.getBoundingClientRect();
-      const width = rect.width;
-      const height = rect.height;
-
-      this.#ctx.strokeStyle = this.#config.gridColor;
-      this.#ctx.lineWidth = this.#config.gridLineWidth;
-      this.#ctx.beginPath();
-
-      // Lignes horizontales (tous les 50px)
-      for (let y = 0; y < height; y += 50) {
-        this.#ctx.moveTo(0, y);
-        this.#ctx.lineTo(width, y);
-      }
-
-      // Lignes verticales (tous les 50px)
-      for (let x = 0; x < width; x += 50) {
-        this.#ctx.moveTo(x, 0);
-        this.#ctx.lineTo(x, height);
-      }
-
-      this.#ctx.stroke();
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur drawGrid', err);
-    }
-  }
-
-  /**
-   * Dessiner les axes X et Y
-   * @private
-   */
-  #drawAxes() {
-    try {
-      const rect = this.#canvas.getBoundingClientRect();
-      const width = rect.width;
-
-      this.#ctx.strokeStyle = this.#config.axisColor;
-      this.#ctx.lineWidth = this.#config.axisLineWidth;
-      this.#ctx.beginPath();
-
-      // Axe horizontal (centre)
-      this.#ctx.moveTo(0, this.#centerY);
-      this.#ctx.lineTo(width, this.#centerY);
-
-      this.#ctx.stroke();
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur drawAxes', err);
-    }
-  }
-
-  /**
-   * Dessiner la courbe avec interpolation Catmull-Rom
-   * @private
-   */
-  #drawCurve() {
-    try {
-      const rect = this.#canvas.getBoundingClientRect();
-      const width = rect.width;
-
-      // Configuration du style
-      this.#ctx.strokeStyle = this.#config.lineColor;
-      this.#ctx.lineWidth = this.#config.lineWidth;
-      this.#ctx.shadowBlur = this.#config.shadowBlur;
-      this.#ctx.shadowColor = this.#config.shadowColor;
-      this.#ctx.lineCap = 'round';
-      this.#ctx.lineJoin = 'round';
-
-      // Calculer espacement X
-      const spacing = width / (this.#maxPoints - 1);
-
-      this.#ctx.beginPath();
-
-      // Premier point
-      const firstPoint = this.#points[0];
-      this.#ctx.moveTo(0, firstPoint.y);
-
-      // Interpolation Catmull-Rom
-      for (let i = 0; i < this.#points.length - 1; i++) {
-        const p0 = this.#points[Math.max(0, i - 1)];
-        const p1 = this.#points[i];
-        const p2 = this.#points[i + 1];
-        const p3 = this.#points[Math.min(this.#points.length - 1, i + 2)];
-
-        const x1 = i * spacing;
-        const x2 = (i + 1) * spacing;
-
-        // Interpolation sur plusieurs segments
-        const segments = 10;
-        for (let t = 0; t <= segments; t++) {
-          const u = t / segments;
-          const x = x1 + (x2 - x1) * u;
-          const y = this.#catmullRom(
-            p0.y, p1.y, p2.y, p3.y, 
-            u, 
-            this.#config.tension
-          );
-
-          if (t === 0) {
-            this.#ctx.lineTo(x, y);
-          } else {
-            this.#ctx.lineTo(x, y);
-          }
-        }
-      }
-
-      this.#ctx.stroke();
-
-      // Réinitialiser shadow
-      this.#ctx.shadowBlur = 0;
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur drawCurve', err);
-    }
-  }
-
-  /**
-   * Interpolation Catmull-Rom
-   * @private
-   */
-  #catmullRom(p0, p1, p2, p3, t, tension) {
-    try {
-      const v0 = (p2 - p0) * tension;
-      const v1 = (p3 - p1) * tension;
-
-      const t2 = t * t;
-      const t3 = t * t2;
-
-      return (2 * p1 - 2 * p2 + v0 + v1) * t3 +
-             (-3 * p1 + 3 * p2 - 2 * v0 - v1) * t2 +
-             v0 * t + p1;
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur catmullRom', err);
-      return p1; // Fallback
-    }
-  }
-
-  /**
-   * Dessiner les statistiques de debug
-   * @private
-   */
-  #drawStats() {
-    try {
-      if (this.#points.length === 0) {
-        return;
-      }
-
-      const lastPoint = this.#points[this.#points.length - 1];
-
-      this.#ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-      this.#ctx.font = '12px monospace';
-      this.#ctx.textAlign = 'left';
-
-      const stats = [
-        `Mode: ${this.#mode}`,
-        `Points: ${this.#points.length}`,
-        `Freq: ${lastPoint.frequency.toFixed(2)} Hz`,
-        `Y: ${lastPoint.y.toFixed(0)} px`
-      ];
-
-      stats.forEach((stat, i) => {
-        this.#ctx.fillText(stat, 10, 20 + i * 15);
-      });
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur drawStats', err);
-    }
-  }
-
-  /**
-   * Démarrer le rendu
-   */
   start() {
-    try {
-      if (this.#isRunning) {
-        Logger.warn('SinusoidalRenderer', 'Déjà en cours');
-        return;
-      }
-
-      this.#isRunning = true;
-      this.#render();
-      Logger.info('SinusoidalRenderer', 'Rendu démarré');
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur start', err);
-    }
+    if (this.running) return;
+    if (!this.analyser) this.connectToMicrophone();
+    if (!this.analyser) return; // attendra un prochain start() après que le micro soit prêt
+    this.running = true;
+    this._loop();
   }
 
-  /**
-   * Arrêter le rendu
-   */
   stop() {
-    try {
-      this.#isRunning = false;
-
-      if (this.#animationId) {
-        cancelAnimationFrame(this.#animationId);
-        this.#animationId = null;
-      }
-
-      Logger.info('SinusoidalRenderer', 'Rendu arrêté');
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur stop', err);
-    }
+    this.running = false;
   }
 
-  /**
-   * Effacer tous les points
-   */
   clear() {
-    try {
-      this.#points = [];
-      this.#clear();
-      Logger.debug('SinusoidalRenderer', 'Points effacés');
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur clear', err);
-    }
+    const { ctx, canvas } = this;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(this.axesLayer, 0, 0);
+    this.x = 0;
   }
 
-  /**
-   * Définir la fréquence de référence
-   * @param {number} freq - Fréquence en Hz
-   */
-  setReferenceFrequency(freq) {
-    try {
-      if (typeof freq !== 'number' || freq <= 0) {
-        throw new Error('Fréquence invalide');
+  setMode(_) {
+    // placeholder pour compat avec le panneau (A440/absolute/auto)
+  }
+
+  _loop() {
+    if (!this.running) return;
+
+    // Dessine axes en fond (mais on laisse les anciennes courbes visibles : pas d’effacement total)
+    // On ne redessine PAS l’axesLayer à chaque frame pour conserver le tracé (persistant).
+    // Simplement, on re-blitte l’axesLayer si on est au tout début (x === 0).
+    if (this.x === 0) {
+      this.ctx.drawImage(this.axesLayer, 0, 0);
+      // Tics de temps init à 0s sur l’axe
+      this._drawTimeTick(0, '0');
+    }
+
+    // Si on a atteint le bord droit et qu’on veut de la persistance, on fige
+    if (this.persistent && this.x >= this.plotW) {
+      requestAnimationFrame(() => this._loop());
+      return;
+    }
+
+    // Récupère un chunk des échantillons temporels
+    this.analyser.getFloatTimeDomainData(this.timeData);
+
+    // Choix : on trace ~256 points par frame pour avoir une courbe bien lisible
+    const stepSample = Math.max(1, Math.floor(this.timeData.length / 256));
+    const points = Math.floor(this.timeData.length / stepSample);
+
+    // Échelle verticale (on “amplifie” légèrement)
+    const amp = (this.plotH * 0.4);
+
+    // Position de départ du tracé courant
+    let xCanvas = this.margin.left + this.x;
+    let yPrev = null;
+
+    this.ctx.lineWidth = 2;
+    this.ctx.strokeStyle = this.waveColor;
+    this.ctx.beginPath();
+
+    for (let i = 0; i < points; i++) {
+      const v = this.timeData[i * stepSample]; // -1..1
+      const y = this.margin.top + (this.plotH / 2) - v * amp;
+
+      if (yPrev == null) {
+        this.ctx.moveTo(xCanvas, y);
+      } else {
+        this.ctx.lineTo(xCanvas, yPrev);
+        this.ctx.lineTo(xCanvas + 1, y);
       }
+      yPrev = y;
 
-      this.#referenceFreq = freq;
-      Logger.info('SinusoidalRenderer', `Référence: ${freq} Hz`);
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur setReferenceFrequency', err);
+      // Avance doucement : ~1 px pour 4 points pour remplir tranquillement la largeur
+      if (i % 4 === 0) xCanvas += 1;
     }
-  }
+    this.ctx.stroke();
 
-  /**
-   * Obtenir le nombre de points actuels
-   * @returns {number}
-   */
-  getPointCount() {
-    return this.#points.length;
-  }
+    // Met à jour le curseur x (combien de pixels on a réellement ajoutés)
+    const advanced = Math.max(0, Math.min(this.plotW - this.x, Math.floor(points / 4)));
+    const oldX = this.x;
+    this.x += advanced;
 
-  /**
-   * Vérifier si le rendu est actif
-   * @returns {boolean}
-   */
-  isRunning() {
-    return this.#isRunning;
-  }
-
-  /**
-   * Mettre à jour la configuration
-   * @param {Object} newConfig - Nouvelle configuration
-   */
-  updateConfig(newConfig) {
-    try {
-      this.#config = {
-        ...this.#config,
-        ...newConfig
-      };
-      Logger.info('SinusoidalRenderer', 'Configuration mise à jour', newConfig);
-
-    } catch (err) {
-      Logger.error('SinusoidalRenderer', 'Erreur updateConfig', err);
+    // Ajoute des tics de temps toutes les ~0.5 s (estimation)
+    // Estimation simple : fftSize / sampleRate ≈ 2048/44100 ≈ 46.4ms par buffer
+    // Comme on avance ~points/4 px, on peut approximer 1s ≈ 22 px (ajustable).
+    const pxPerSec = 22; // empirique pour affichage lisible
+    const oldSec = Math.floor(oldX / pxPerSec);
+    const newSec = Math.floor(this.x / pxPerSec);
+    if (newSec !== oldSec) {
+      this._drawTimeTick(this.x, String(newSec));
     }
+
+    requestAnimationFrame(() => this._loop());
+  }
+
+  _drawTimeTick(xPlot, label) {
+    // Dessine la graduation verticale (temps) dans le canvas principal (par-dessus)
+    const x = this.margin.left + xPlot;
+    const y1 = this.margin.top + this.plotH;
+    const y2 = y1 + 6;
+
+    this.ctx.strokeStyle = this.gridColor;
+    this.ctx.beginPath();
+    this.ctx.moveTo(x, y1);
+    this.ctx.lineTo(x, y2);
+    this.ctx.stroke();
+
+    this.ctx.fillStyle = this.textColor;
+    this.ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'top';
+    this.ctx.fillText(label, x, y2 + 2);
   }
 }
+
+export default SinusoidalRenderer;

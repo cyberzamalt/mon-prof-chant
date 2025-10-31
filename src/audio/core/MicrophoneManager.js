@@ -1,5 +1,5 @@
 // src/audio/core/MicrophoneManager.js
-// Utilise TOUJOURS le même AudioContext partagé (AudioEngine) et chemin compatible Firefox.
+// Partage le même AudioContext (AudioEngine) et s’assure qu’il est prêt avant d’ouvrir le micro.
 
 import { Logger } from '../../logging/Logger.js';
 import { AudioEngine } from './AudioEngine.js';
@@ -12,7 +12,7 @@ class MicrophoneManager {
         echoCancellation: false,
         noiseSuppression: false,
         autoGainControl: false,
-        // sampleRate: 48000, // optionnel si tu veux forcer 48 kHz
+        // sampleRate: 48000, // optionnel (ne pas forcer tant que tout marche)
       }
     };
     this.stream = null;
@@ -20,17 +20,23 @@ class MicrophoneManager {
   }
 
   async start() {
-    const engine = AudioEngine.getInstance();
-    const ctx = engine?.context;
-    if (!ctx) throw new Error('AudioContext non initialisé');
-
     try {
+      const engine = AudioEngine.getInstance();
+
+      // ✅ Assurer que l’AudioContext existe (au cas où)
+      if (!engine.context || engine.context.state === 'closed') {
+        Logger.warn('[MicrophoneManager] AudioContext manquant → init()');
+        await engine.init();
+      }
+      const ctx = engine.context;
+      if (!ctx) throw new Error('AudioContext non disponible');
+
       Logger.info('[MicrophoneManager] Demande accès microphone...', this.constraints);
       const stream = await navigator.mediaDevices.getUserMedia(this.constraints);
       this.stream = stream;
       Logger.info('[MicrophoneManager] Accès microphone accordé');
 
-      // ✅ Chemin le plus robuste (Firefox/Chrome/Safari)
+      // ✅ Chemin robuste Firefox/Chrome
       this.source = ctx.createMediaStreamSource(stream);
 
       Logger.info('[MicrophoneManager] Source créée', {

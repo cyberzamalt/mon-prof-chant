@@ -1,18 +1,20 @@
 /**
- * NoteFrequencies.js - Table des Fréquences des Notes
+ * NoteFrequencies.js
+ * Table de référence des fréquences des notes
  * 
- * Table de référence complète des fréquences musicales
- * Notes de C0 à C8 avec leurs fréquences en Hz
+ * Responsabilités:
+ * - Fournir les fréquences standard des notes (A4=440Hz)
+ * - Mapping nom de note → fréquence
+ * - Plages de fréquences par octave
  * 
- * Fichier 5/18 - FONDATIONS
- * Dépend de: constants.js
+ * Standard: A4 = 440Hz (La 440)
+ * Formule: f(n) = 440 × 2^((n-69)/12)
+ * où n = numéro MIDI (A4 = 69, C4 = 60)
  */
 
-import { MUSIC, PITCH_DETECTION } from '../config/constants.js';
-
 /**
- * Table complète des fréquences (C0 à C8)
- * Basée sur le tempérament égal avec A440 comme référence
+ * Table complète des fréquences (C0 à B8)
+ * Format: 'NOTE_NAME_OCTAVE': frequency_in_Hz
  */
 export const NOTE_FREQUENCIES = {
   // Octave 0
@@ -28,7 +30,7 @@ export const NOTE_FREQUENCIES = {
   'A0': 27.50,
   'A#0': 29.14,
   'B0': 30.87,
-  
+
   // Octave 1
   'C1': 32.70,
   'C#1': 34.65,
@@ -42,8 +44,8 @@ export const NOTE_FREQUENCIES = {
   'A1': 55.00,
   'A#1': 58.27,
   'B1': 61.74,
-  
-  // Octave 2 (Zone basse pour voix masculine)
+
+  // Octave 2
   'C2': 65.41,
   'C#2': 69.30,
   'D2': 73.42,
@@ -56,8 +58,8 @@ export const NOTE_FREQUENCIES = {
   'A2': 110.00,
   'A#2': 116.54,
   'B2': 123.47,
-  
-  // Octave 3 (Voix masculine standard)
+
+  // Octave 3
   'C3': 130.81,
   'C#3': 138.59,
   'D3': 146.83,
@@ -70,9 +72,9 @@ export const NOTE_FREQUENCIES = {
   'A3': 220.00,
   'A#3': 233.08,
   'B3': 246.94,
-  
-  // Octave 4 (Voix féminine standard, contient A440)
-  'C4': 261.63,
+
+  // Octave 4 (Octave centrale du piano)
+  'C4': 261.63,  // Do central
   'C#4': 277.18,
   'D4': 293.66,
   'D#4': 311.13,
@@ -81,11 +83,11 @@ export const NOTE_FREQUENCIES = {
   'F#4': 369.99,
   'G4': 392.00,
   'G#4': 415.30,
-  'A4': 440.00, // ⭐ Référence A440
+  'A4': 440.00,  // La 440 (référence standard)
   'A#4': 466.16,
   'B4': 493.88,
-  
-  // Octave 5 (Voix aiguë)
+
+  // Octave 5
   'C5': 523.25,
   'C#5': 554.37,
   'D5': 587.33,
@@ -98,8 +100,8 @@ export const NOTE_FREQUENCIES = {
   'A5': 880.00,
   'A#5': 932.33,
   'B5': 987.77,
-  
-  // Octave 6 (Très aigu)
+
+  // Octave 6
   'C6': 1046.50,
   'C#6': 1108.73,
   'D6': 1174.66,
@@ -112,7 +114,7 @@ export const NOTE_FREQUENCIES = {
   'A6': 1760.00,
   'A#6': 1864.66,
   'B6': 1975.53,
-  
+
   // Octave 7
   'C7': 2093.00,
   'C#7': 2217.46,
@@ -126,252 +128,194 @@ export const NOTE_FREQUENCIES = {
   'A7': 3520.00,
   'A#7': 3729.31,
   'B7': 3951.07,
-  
+
   // Octave 8
-  'C8': 4186.01
+  'C8': 4186.01,
+  'C#8': 4434.92,
+  'D8': 4698.63,
+  'D#8': 4978.03,
+  'E8': 5274.04,
+  'F8': 5587.65,
+  'F#8': 5919.91,
+  'G8': 6271.93,
+  'G#8': 6644.88,
+  'A8': 7040.00,
+  'A#8': 7458.62,
+  'B8': 7902.13
 };
 
 /**
- * Table inversée: Hz → Note
- * Permet de trouver la note la plus proche d'une fréquence
+ * Plages de fréquences utiles pour le chant
  */
-export const FREQUENCY_TO_NOTE = Object.fromEntries(
-  Object.entries(NOTE_FREQUENCIES).map(([note, hz]) => [hz, note])
-);
+export const VOCAL_RANGES = {
+  // Voix féminines
+  SOPRANO: { min: 261.63, max: 1046.50, notes: 'C4-C6' },
+  MEZZO_SOPRANO: { min: 220.00, max: 880.00, notes: 'A3-A5' },
+  ALTO: { min: 174.61, max: 698.46, notes: 'F3-F5' },
+
+  // Voix masculines
+  TENOR: { min: 130.81, max: 523.25, notes: 'C3-C5' },
+  BARITONE: { min: 110.00, max: 440.00, notes: 'A2-A4' },
+  BASS: { min: 82.41, max: 349.23, notes: 'E2-F4' },
+
+  // Plage complète
+  FULL_VOCAL: { min: 82.41, max: 1046.50, notes: 'E2-C6' }
+};
 
 /**
- * Récupère la fréquence d'une note
- * @param {string} noteName - Nom de la note (ex: 'A4', 'C#3')
- * @returns {number} Fréquence en Hz ou 0 si non trouvée
+ * Noms des notes (sans octave)
+ */
+export const NOTE_NAMES = [
+  'C', 'C#', 'D', 'D#', 'E', 'F', 
+  'F#', 'G', 'G#', 'A', 'A#', 'B'
+];
+
+/**
+ * Noms alternatifs (bémols)
+ */
+export const NOTE_NAMES_FLATS = [
+  'C', 'Db', 'D', 'Eb', 'E', 'F',
+  'Gb', 'G', 'Ab', 'A', 'Bb', 'B'
+];
+
+/**
+ * Configuration par défaut pour l'analyse
+ */
+export const ANALYSIS_CONFIG = {
+  // Plage de détection recommandée
+  MIN_FREQUENCY: 60,    // ~B1
+  MAX_FREQUENCY: 1200,  // ~D#6
+  
+  // Seuils de qualité
+  MIN_CLARITY: 0.85,    // Clarté minimale pour valider une détection
+  
+  // Référence standard
+  A4_REFERENCE: 440,    // Hz
+  
+  // Tolérance
+  CENTS_TOLERANCE: 10   // ±10 cents = "juste"
+};
+
+/**
+ * Obtenir la fréquence d'une note par son nom
+ * @param {string} noteName - Nom de la note (ex: 'A4', 'C#5')
+ * @returns {number|null} Fréquence en Hz ou null si introuvable
  */
 export function getFrequency(noteName) {
-  if (!noteName || typeof noteName !== 'string') return 0;
-  
-  const freq = NOTE_FREQUENCIES[noteName.toUpperCase()];
-  return freq || 0;
+  try {
+    if (!noteName || typeof noteName !== 'string') {
+      console.warn('[NoteFrequencies] Nom de note invalide:', noteName);
+      return null;
+    }
+
+    const freq = NOTE_FREQUENCIES[noteName];
+    if (freq === undefined) {
+      console.warn('[NoteFrequencies] Note introuvable:', noteName);
+      return null;
+    }
+
+    return freq;
+
+  } catch (err) {
+    console.error('[NoteFrequencies] Erreur getFrequency:', err);
+    return null;
+  }
 }
 
 /**
- * Trouve la note la plus proche d'une fréquence donnée
- * @param {number} hz - Fréquence en Hz
- * @returns {object} {note: 'A4', hz: 440.00, cents: 0}
+ * Trouver la note la plus proche d'une fréquence
+ * @param {number} frequency - Fréquence en Hz
+ * @returns {Object|null} { note, octave, frequency, diff }
  */
-export function findClosestNote(hz) {
-  if (!hz || hz <= 0) {
-    return { note: null, hz: 0, cents: 0 };
-  }
-  
+export function findClosestNote(frequency) {
   try {
+    if (typeof frequency !== 'number' || frequency <= 0) {
+      console.warn('[NoteFrequencies] Fréquence invalide:', frequency);
+      return null;
+    }
+
     let closestNote = null;
-    let closestHz = 0;
     let minDiff = Infinity;
-    
-    // Parcourir toutes les notes
-    for (const [note, noteHz] of Object.entries(NOTE_FREQUENCIES)) {
-      const diff = Math.abs(Math.log2(hz / noteHz));
-      
+
+    for (const [noteName, noteFreq] of Object.entries(NOTE_FREQUENCIES)) {
+      const diff = Math.abs(frequency - noteFreq);
       if (diff < minDiff) {
         minDiff = diff;
-        closestNote = note;
-        closestHz = noteHz;
+        
+        // Parser le nom (ex: "C#4" -> note="C#", octave=4)
+        const match = noteName.match(/^([A-G]#?)(\d+)$/);
+        if (match) {
+          closestNote = {
+            note: match[1],
+            octave: parseInt(match[2]),
+            frequency: noteFreq,
+            diff: diff,
+            name: noteName
+          };
+        }
       }
     }
-    
-    // Calculer la déviation en cents
-    const cents = closestHz ? Math.round(1200 * Math.log2(hz / closestHz)) : 0;
-    
-    return {
-      note: closestNote,
-      hz: closestHz,
-      cents
-    };
-    
-  } catch (error) {
-    console.error('Erreur findClosestNote:', error);
-    return { note: null, hz: 0, cents: 0 };
+
+    return closestNote;
+
+  } catch (err) {
+    console.error('[NoteFrequencies] Erreur findClosestNote:', err);
+    return null;
   }
 }
 
 /**
- * Vérifie si une note existe dans la table
- * @param {string} noteName - Nom de la note
- * @returns {boolean} true si existe
+ * Vérifier si une fréquence est dans une plage vocale
+ * @param {number} frequency - Fréquence en Hz
+ * @param {string} range - Nom de la plage (ex: 'SOPRANO', 'TENOR')
+ * @returns {boolean} true si dans la plage
  */
-export function noteExists(noteName) {
-  if (!noteName || typeof noteName !== 'string') return false;
-  return NOTE_FREQUENCIES.hasOwnProperty(noteName.toUpperCase());
+export function isInVocalRange(frequency, range = 'FULL_VOCAL') {
+  try {
+    const vocalRange = VOCAL_RANGES[range];
+    if (!vocalRange) {
+      console.warn('[NoteFrequencies] Plage vocale inconnue:', range);
+      return false;
+    }
+
+    return frequency >= vocalRange.min && frequency <= vocalRange.max;
+
+  } catch (err) {
+    console.error('[NoteFrequencies] Erreur isInVocalRange:', err);
+    return false;
+  }
 }
 
 /**
- * Récupère toutes les notes d'une octave
+ * Obtenir toutes les notes d'une octave
  * @param {number} octave - Numéro d'octave (0-8)
- * @returns {object} Objet avec notes de l'octave
+ * @returns {Array} Liste des notes avec leurs fréquences
  */
 export function getOctaveNotes(octave) {
-  if (octave < 0 || octave > 8) return {};
-  
-  const octaveNotes = {};
-  
-  for (const [note, hz] of Object.entries(NOTE_FREQUENCIES)) {
-    if (note.endsWith(String(octave))) {
-      octaveNotes[note] = hz;
+  try {
+    if (typeof octave !== 'number' || octave < 0 || octave > 8) {
+      console.warn('[NoteFrequencies] Octave invalide:', octave);
+      return [];
     }
-  }
-  
-  return octaveNotes;
-}
 
-/**
- * Récupère la plage de fréquences pour une octave
- * @param {number} octave - Numéro d'octave (0-8)
- * @returns {object} {min: Hz, max: Hz}
- */
-export function getOctaveRange(octave) {
-  const notes = getOctaveNotes(octave);
-  const frequencies = Object.values(notes);
-  
-  if (frequencies.length === 0) {
-    return { min: 0, max: 0 };
-  }
-  
-  return {
-    min: Math.min(...frequencies),
-    max: Math.max(...frequencies)
-  };
-}
-
-/**
- * Récupère toutes les notes dans une plage de fréquences
- * @param {number} minHz - Fréquence minimale
- * @param {number} maxHz - Fréquence maximale
- * @returns {object} Notes dans la plage
- */
-export function getNotesInRange(minHz, maxHz) {
-  const notesInRange = {};
-  
-  for (const [note, hz] of Object.entries(NOTE_FREQUENCIES)) {
-    if (hz >= minHz && hz <= maxHz) {
-      notesInRange[note] = hz;
+    const notes = [];
+    for (const noteName of NOTE_NAMES) {
+      const fullName = `${noteName}${octave}`;
+      const freq = NOTE_FREQUENCIES[fullName];
+      if (freq !== undefined) {
+        notes.push({
+          name: fullName,
+          note: noteName,
+          octave: octave,
+          frequency: freq
+        });
+      }
     }
+
+    return notes;
+
+  } catch (err) {
+    console.error('[NoteFrequencies] Erreur getOctaveNotes:', err);
+    return [];
   }
-  
-  return notesInRange;
 }
-
-/**
- * Récupère les notes utilisables pour le chant (G2 à E6)
- * Plage vocale typique pour voix humaine
- * @returns {object} Notes chantables
- */
-export function getVocalRange() {
-  return getNotesInRange(98.00, 1318.51); // G2 à E6
-}
-
-/**
- * Détermine le type de voix selon la note
- * @param {string} noteName - Nom de la note
- * @returns {string} Type de voix (Basse, Ténor, Alto, Soprano)
- */
-export function getVoiceType(noteName) {
-  const hz = getFrequency(noteName);
-  
-  if (!hz) return 'Inconnu';
-  
-  if (hz < 130.81) return 'Basse profonde'; // < C3
-  if (hz < 196.00) return 'Basse'; // C3 - G3
-  if (hz < 261.63) return 'Ténor'; // G3 - C4
-  if (hz < 392.00) return 'Alto'; // C4 - G4
-  if (hz < 523.25) return 'Mezzo-soprano'; // G4 - C5
-  if (hz < 1046.50) return 'Soprano'; // C5 - C6
-  return 'Soprano colorature'; // > C6
-}
-
-/**
- * Génère une gamme majeure à partir d'une tonique
- * @param {string} tonic - Note tonique (ex: 'C4')
- * @returns {object[]} Tableau des notes de la gamme
- */
-export function getMajorScale(tonic) {
-  const tonicHz = getFrequency(tonic);
-  if (!tonicHz) return [];
-  
-  // Intervalles de la gamme majeure (en demi-tons)
-  const intervals = [0, 2, 4, 5, 7, 9, 11, 12];
-  
-  const scale = [];
-  
-  for (const interval of intervals) {
-    // Calculer la fréquence
-    const hz = tonicHz * Math.pow(2, interval / 12);
-    
-    // Trouver la note correspondante
-    const noteInfo = findClosestNote(hz);
-    
-    scale.push({
-      degree: intervals.indexOf(interval) + 1,
-      note: noteInfo.note,
-      hz: noteInfo.hz
-    });
-  }
-  
-  return scale;
-}
-
-/**
- * Génère une gamme mineure naturelle à partir d'une tonique
- * @param {string} tonic - Note tonique (ex: 'A3')
- * @returns {object[]} Tableau des notes de la gamme
- */
-export function getMinorScale(tonic) {
-  const tonicHz = getFrequency(tonic);
-  if (!tonicHz) return [];
-  
-  // Intervalles de la gamme mineure naturelle (en demi-tons)
-  const intervals = [0, 2, 3, 5, 7, 8, 10, 12];
-  
-  const scale = [];
-  
-  for (const interval of intervals) {
-    const hz = tonicHz * Math.pow(2, interval / 12);
-    const noteInfo = findClosestNote(hz);
-    
-    scale.push({
-      degree: intervals.indexOf(interval) + 1,
-      note: noteInfo.note,
-      hz: noteInfo.hz
-    });
-  }
-  
-  return scale;
-}
-
-/**
- * Exporte la table au format CSV
- * @returns {string} Table en CSV
- */
-export function exportToCSV() {
-  let csv = 'Note,Frequency (Hz)\n';
-  
-  for (const [note, hz] of Object.entries(NOTE_FREQUENCIES)) {
-    csv += `${note},${hz}\n`;
-  }
-  
-  return csv;
-}
-
-// Export tout
-export default {
-  NOTE_FREQUENCIES,
-  FREQUENCY_TO_NOTE,
-  getFrequency,
-  findClosestNote,
-  noteExists,
-  getOctaveNotes,
-  getOctaveRange,
-  getNotesInRange,
-  getVocalRange,
-  getVoiceType,
-  getMajorScale,
-  getMinorScale,
-  exportToCSV
-};

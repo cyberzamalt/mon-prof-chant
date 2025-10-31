@@ -1,135 +1,70 @@
 // src/ui/components/PitchAnalysisPanel.js
+// Panneau qui pilote le renderer “sinusoïdale persistante” + affiche les infos
 import { Logger } from '../../logging/Logger.js';
+import { EventBus } from '../../core/EventBus.js';
+import { CentsCalculator } from '../../audio/analysis/CentsCalculator.js';
+import SinusoidalRenderer from '../../visualization/renderers/SinusoidalRenderer.js';
 
 export class PitchAnalysisPanel {
-  #type;
-  #canvas;
-  #ctx;
-  #eventBus;
-  #pitchService;
+  constructor({
+    type = 'recording',
+    containerId,
+    canvasId,
+    pitchService,
+    eventBus,
+    audioEngine,     // 🔥 nouveau
+    microphone       // 🔥 nouveau
+  }) {
+    this.type = type;
+    this.container = document.getElementById(containerId);
+    this.canvas = document.getElementById(canvasId);
+    this.pitchService = pitchService;
+    this.eventBus = eventBus || new EventBus();
 
-  #analyser = null;
-  #data = null;
-  #raf = 0;
-  #mode = 'A440';
-  #active = false;
+    // 🔥 références audio
+    this.audioEngine = audioEngine;
+    this.microphone = microphone;
 
-  constructor({ type, containerId, canvasId, pitchService, eventBus }) {
-    this.#type = type;
-    this.#eventBus = eventBus;
-    this.#pitchService = pitchService;
+    // État
+    this.active = false;
 
-    const canvas = document.getElementById(canvasId);
-    this.#canvas = canvas;
-    this.#ctx = canvas?.getContext('2d');
+    // Renderer : sinusoïde très visible + axes + persistance
+    this.renderer = new SinusoidalRenderer(this.canvas, {
+      audioEngine: this.audioEngine,
+      microphone: this.microphone,
+      persistent: true
+    });
 
-    Logger.info('PitchAnalysisPanel', `Panneau ${type} créé `, { container: containerId, canvas: canvasId });
-  }
-
-  isActive() { return this.#active; }
-
-  setMode(mode) {
-    this.#mode = mode;
-    Logger.info('PitchAnalysisPanel', 'Mode changé:', mode);
-  }
-
-  /**
-   * Brancher une source audio (MediaStreamAudioSourceNode) pour l’affichage waveform
-   */
-  setAudioSource(sourceNode, audioContext) {
-    if (!sourceNode || !audioContext) return;
-    // Analyser pour affichage temporel (forme d’onde « sinusoidale »)
-    this.#analyser = audioContext.createAnalyser();
-    this.#analyser.fftSize = 2048;
-    this.#data = new Uint8Array(this.#analyser.fftSize);
-    sourceNode.connect(this.#analyser);
-    Logger.info('PitchAnalysisPanel', 'Source audio connectée au visualiseur');
+    Logger.info('[PitchAnalysisPanel] Renderer créé');
   }
 
   start() {
-    if (this.#active) return;
-    this.#active = true;
-    Logger.info('PitchAnalysisPanel', 'Panneau démarré');
-    this.#loop();
+    if (this.active) return;
+    // Le micro est déjà démarré au moment où handleStart() t’appelle → connect & go
+    this.renderer.start();
+    this.active = true;
+    Logger.info('[PitchAnalysisPanel] Panneau démarré');
   }
 
   stop() {
-    this.#active = false;
-    if (this.#raf) cancelAnimationFrame(this.#raf);
-    this.clear();
+    if (!this.active) return;
+    this.renderer.stop();
+    this.active = false;
   }
 
   clear() {
-    if (!this.#ctx || !this.#canvas) return;
-    this.#ctx.clearRect(0, 0, this.#canvas.width, this.#canvas.height);
-    Logger.info('PitchAnalysisPanel', 'Panneau effacé');
+    this.renderer.clear();
+    Logger.info('[PitchAnalysisPanel] Panneau effacé');
   }
 
-  #loop = () => {
-    if (!this.#active) return;
-
-    if (this.#analyser && this.#data) {
-      this.#analyser.getByteTimeDomainData(this.#data);
-      this.#drawWaveform(this.#data);
-    } else {
-      // Affichage idle
-      this.#drawIdle();
-    }
-
-    this.#raf = requestAnimationFrame(this.#loop);
-  };
-
-  #drawWaveform(data) {
-    if (!this.#ctx || !this.#canvas) return;
-
-    const { width, height } = this.#canvas;
-    const ctx = this.#ctx;
-
-    ctx.clearRect(0, 0, width, height);
-
-    // grille légère
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
-    for (let x = 0; x < width; x += 40) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
-    }
-    for (let y = 0; y < height; y += 40) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
-    }
-
-    // axe médian
-    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-    ctx.beginPath();
-    ctx.moveTo(0, height / 2);
-    ctx.lineTo(width, height / 2);
-    ctx.stroke();
-
-    // waveform
-    ctx.strokeStyle = '#00e5ff';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-
-    const slice = width / data.length;
-    for (let i = 0; i < data.length; i++) {
-      const v = data[i] / 128.0;            // 0..255 → 0..~2
-      const y = (v * height) / 2;           // centré
-      const x = i * slice;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
+  isActive() {
+    return this.active;
   }
 
-  #drawIdle() {
-    if (!this.#ctx || !this.#canvas) return;
-    const { width, height } = this.#canvas;
-    const ctx = this.#ctx;
-    ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = 'rgba(255,255,255,0.08)';
-    ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    ctx.font = '12px monospace';
-    ctx.fillText('En attente du micro…', 10, 20);
+  setMode(mode) {
+    this.renderer.setMode(mode);
+    if (this.pitchService) this.pitchService.setMode?.(mode);
+    Logger.info('[PitchAnalysisPanel] Mode changé:', mode);
   }
 }
 

@@ -1,31 +1,47 @@
 // src/audio/core/AudioEngine.js
 import { Logger } from '../../logging/Logger.js';
 
-export class AudioEngine {
+class AudioEngine {
   static #instance;
-  context = null;
-  analyser = null;
+  #ctx = null;
 
-  static getInstance(){
-    if(!this.#instance) this.#instance = new AudioEngine();
+  static getInstance() {
+    if (!this.#instance) this.#instance = new AudioEngine();
     return this.#instance;
   }
 
-  async init(){
-    if(this.context) { Logger.warn('[AudioEngine] Déjà initialisé'); return this.context; }
-    const AC = window.AudioContext || window.webkitAudioContext;
-    this.context = new AC({ sampleRate: 44100 });
-    Logger.info('[AudioEngine] Contexte prêt', this.context);
+  get context() { return this.#ctx; }
 
-    this.analyser = this.context.createAnalyser();
-    this.analyser.fftSize = 2048;
-    this.analyser.smoothingTimeConstant = 0.85;
-    return this.context;
+  async init(sampleRateHint) {
+    if (this.#ctx) { Logger.warn('[AudioEngine] Déjà initialisé'); return this.#ctx; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    try {
+      this.#ctx = sampleRateHint ? new AC({ sampleRate: sampleRateHint }) : new AC();
+    } catch (e) {
+      this.#ctx = new AC(); // fallback
+    }
+    try { await this.#ctx.resume(); } catch (_) {}
+    Logger.info('[AudioEngine] Contexte prêt', this.#ctx);
+    return this.#ctx;
   }
 
-  ready(){
-    if(!this.context) throw new Error('AudioContext non prêt');
-    return { context:this.context, analyser:this.analyser };
+  async reinit(targetRate) {
+    if (this.#ctx?.sampleRate === targetRate) return this.#ctx;
+    try { await this.#ctx?.close(); } catch (_) {}
+    this.#ctx = null;
+    Logger.warn('[AudioEngine] Recréation du contexte @', targetRate);
+    return this.init(targetRate);
+  }
+
+  createAnalyser(opts = {}) {
+    if (!this.#ctx) throw new Error('AudioEngine non initialisé');
+    return new AnalyserNode(this.#ctx, {
+      fftSize: 2048,
+      smoothingTimeConstant: 0.85,
+      ...opts
+    });
   }
 }
+
+export { AudioEngine };
 export const audioEngine = AudioEngine.getInstance();

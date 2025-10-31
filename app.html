@@ -377,6 +377,8 @@
             }
         }
     </style>
+<!-- Override thème (vert foncé + masquage bloc arbo debug) --> <style> :root{ /* remplace l’ancien vert fluo */ --ok: #166534; /* green-800 */ } /* Si ton bouton a une classe spécifique, on renforce l’override sans casser le thème */ #btnStart, .btn-start, [data-role="start"]{ background: var(--ok) !important; border-color: var(--ok) !important; } /* Masque le résumé d'architecture en bas de page s'il est présent */ #arch-summary, #repo-structure, .repo-structure, footer.debug-arch { display: none !important; } 
+</style> 
 </head>
 <body>
     <!-- ========================================

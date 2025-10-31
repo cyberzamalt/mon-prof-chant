@@ -21,7 +21,7 @@
 import { Logger } from './logging/Logger.js';
 import { EventBus } from './core/EventBus.js';
 import { AudioEngine } from './audio/core/AudioEngine.js';
-import { MicrophoneManager } from './audio/core/MicrophoneManager.js';
+import MicrophoneManager from './src/audio/core/MicrophoneManager.js';
 import { PitchAnalysisService } from './audio/services/PitchAnalysisService.js';
 import { RecordingService } from './audio/services/RecordingService.js';
 import { CentsCalculator } from './audio/analysis/CentsCalculator.js';

@@ -1,271 +1,181 @@
 /**
- * Logger.js - Système de Logging Centralisé
+ * Logger.js
+ * Système de logging centralisé
  * 
- * Gère tous les logs de l'application (info, warn, error, success)
- * Permet un debug facile et un suivi des opérations
+ * Responsabilités:
+ * - Logger les événements de l'application
+ * - 4 niveaux: DEBUG, INFO, WARN, ERROR
+ * - Formatage console avec couleurs
+ * - Historique en mémoire
  * 
  * Fichier 1/18 - FONDATIONS
  * Pas de dépendances
  */
 
 class Logger {
-  constructor() {
-    this.enabled = true;
-    this.logHistory = [];
-    this.maxHistorySize = 500;
-    
-    // Préfixes colorés pour la console
-    this.prefixes = {
-      info: '🔵 [INFO]',
-      warn: '⚠️  [WARN]',
-      error: '🔴 [ERROR]',
-      success: '✅ [SUCCESS]',
-      debug: '🐛 [DEBUG]'
-    };
-    
-    this.colors = {
-      info: 'color: #2196F3',
-      warn: 'color: #FF9800',
-      error: 'color: #F44336; font-weight: bold',
-      success: 'color: #4CAF50',
-      debug: 'color: #9E9E9E'
-    };
-    
-    this.init();
-  }
-  
+  static #instance = null;
+  static #level = 'INFO';
+  static #levels = {
+    DEBUG: 0,
+    INFO: 1,
+    WARN: 2,
+    ERROR: 3
+  };
+  static #history = [];
+  static #maxHistorySize = 500;
+
   /**
-   * Initialise le logger
+   * Obtenir l'instance unique (singleton)
    */
-  init() {
+  static getInstance() {
+    if (!Logger.#instance) {
+      Logger.#instance = new Logger();
+    }
+    return Logger.#instance;
+  }
+
+  /**
+   * Définir le niveau de log
+   * @param {string} level - 'DEBUG', 'INFO', 'WARN', 'ERROR'
+   */
+  static setLevel(level) {
+    if (Logger.#levels[level] !== undefined) {
+      Logger.#level = level;
+      console.log(`[Logger] Niveau défini: ${level}`);
+    }
+  }
+
+  /**
+   * Obtenir le niveau actuel
+   * @returns {string}
+   */
+  static getLevel() {
+    return Logger.#level;
+  }
+
+  /**
+   * Vérifier si un niveau doit être loggé
+   * @private
+   */
+  static #shouldLog(level) {
+    return Logger.#levels[level] >= Logger.#levels[Logger.#level];
+  }
+
+  /**
+   * Ajouter à l'historique
+   * @private
+   */
+  static #addToHistory(level, module, message, data) {
     try {
-      this.log('Logger', 'Système de logging initialisé', {}, 'info');
-      
-      // Écouter les erreurs globales
-      window.addEventListener('error', (event) => {
-        this.error('Global', 'Erreur non capturée', {
-          message: event.message,
-          filename: event.filename,
-          lineno: event.lineno,
-          colno: event.colno
-        });
+      Logger.#history.push({
+        timestamp: new Date().toISOString(),
+        level: level,
+        module: module,
+        message: message,
+        data: data
       });
-      
-      // Écouter les promesses rejetées non gérées
-      window.addEventListener('unhandledrejection', (event) => {
-        this.error('Global', 'Promise rejetée non gérée', {
-          reason: event.reason
-        });
-      });
-      
+
+      // Limiter la taille
+      if (Logger.#history.length > Logger.#maxHistorySize) {
+        Logger.#history.shift();
+      }
     } catch (err) {
-      console.error('Erreur init Logger:', err);
+      console.error('[Logger] Erreur addToHistory:', err);
     }
   }
-  
+
   /**
-   * Log générique
-   * @param {string} module - Nom du module qui log
-   * @param {string} message - Message à logger
-   * @param {object} data - Données additionnelles
-   * @param {string} level - Niveau (info/warn/error/success/debug)
+   * Logger DEBUG
    */
-  log(module, message, data = {}, level = 'info') {
-    if (!this.enabled) return;
-    
+  static debug(module, message, data = null) {
+    if (!Logger.#shouldLog('DEBUG')) return;
+
+    const prefix = `[DEBUG][${module}]`;
+    if (data) {
+      console.log(`%c${prefix}%c ${message}`, 'color: #888', 'color: inherit', data);
+    } else {
+      console.log(`%c${prefix}%c ${message}`, 'color: #888', 'color: inherit');
+    }
+
+    Logger.#addToHistory('DEBUG', module, message, data);
+  }
+
+  /**
+   * Logger INFO
+   */
+  static info(module, message, data = null) {
+    if (!Logger.#shouldLog('INFO')) return;
+
+    const prefix = `[INFO][${module}]`;
+    if (data) {
+      console.log(`%c${prefix}%c ${message}`, 'color: #00aaff', 'color: inherit', data);
+    } else {
+      console.log(`%c${prefix}%c ${message}`, 'color: #00aaff', 'color: inherit');
+    }
+
+    Logger.#addToHistory('INFO', module, message, data);
+  }
+
+  /**
+   * Logger WARN
+   */
+  static warn(module, message, data = null) {
+    if (!Logger.#shouldLog('WARN')) return;
+
+    const prefix = `[WARN][${module}]`;
+    if (data) {
+      console.warn(`%c${prefix}%c ${message}`, 'color: #ffaa00', 'color: inherit', data);
+    } else {
+      console.warn(`%c${prefix}%c ${message}`, 'color: #ffaa00', 'color: inherit');
+    }
+
+    Logger.#addToHistory('WARN', module, message, data);
+  }
+
+  /**
+   * Logger ERROR
+   */
+  static error(module, message, error = null) {
+    if (!Logger.#shouldLog('ERROR')) return;
+
+    const prefix = `[ERROR][${module}]`;
+    if (error) {
+      console.error(`%c${prefix}%c ${message}`, 'color: #ff0000', 'color: inherit', error);
+    } else {
+      console.error(`%c${prefix}%c ${message}`, 'color: #ff0000', 'color: inherit');
+    }
+
+    Logger.#addToHistory('ERROR', module, message, error);
+  }
+
+  /**
+   * Obtenir l'historique
+   */
+  static getHistory(level = null) {
+    if (!level) return [...Logger.#history];
+    return Logger.#history.filter(entry => entry.level === level);
+  }
+
+  /**
+   * Effacer l'historique
+   */
+  static clearHistory() {
+    Logger.#history = [];
+    console.log('[Logger] Historique effacé');
+  }
+
+  /**
+   * Exporter l'historique en JSON
+   */
+  static exportHistory() {
     try {
-      const timestamp = new Date().toISOString();
-      const logEntry = {
-        timestamp,
-        module,
-        message,
-        data,
-        level
-      };
-      
-      // Ajouter à l'historique
-      this.logHistory.push(logEntry);
-      
-      // Limiter la taille de l'historique
-      if (this.logHistory.length > this.maxHistorySize) {
-        this.logHistory.shift();
-      }
-      
-      // Afficher dans la console
-      const prefix = this.prefixes[level] || this.prefixes.info;
-      const color = this.colors[level] || this.colors.info;
-      
-      const consoleArgs = [
-        `%c${prefix} [${module}] ${message}`,
-        color
-      ];
-      
-      if (Object.keys(data).length > 0) {
-        consoleArgs.push(data);
-      }
-      
-      switch (level) {
-        case 'error':
-          console.error(...consoleArgs);
-          break;
-        case 'warn':
-          console.warn(...consoleArgs);
-          break;
-        default:
-          console.log(...consoleArgs);
-      }
-      
+      return JSON.stringify(Logger.#history, null, 2);
     } catch (err) {
-      console.error('Erreur dans Logger.log:', err);
-    }
-  }
-  
-  /**
-   * Log d'information
-   * @param {string} module - Nom du module
-   * @param {string} message - Message
-   * @param {object} data - Données additionnelles
-   */
-  info(module, message, data = {}) {
-    this.log(module, message, data, 'info');
-  }
-  
-  /**
-   * Log d'avertissement
-   * @param {string} module - Nom du module
-   * @param {string} message - Message
-   * @param {object} data - Données additionnelles
-   */
-  warn(module, message, data = {}) {
-    this.log(module, message, data, 'warn');
-  }
-  
-  /**
-   * Log d'erreur
-   * @param {string} module - Nom du module
-   * @param {string} message - Message
-   * @param {object} data - Données ou objet Error
-   */
-  error(module, message, data = {}) {
-    // Si data est un objet Error, extraire les infos utiles
-    if (data instanceof Error) {
-      data = {
-        message: data.message,
-        stack: data.stack,
-        name: data.name
-      };
-    }
-    
-    this.log(module, message, data, 'error');
-  }
-  
-  /**
-   * Log de succès
-   * @param {string} module - Nom du module
-   * @param {string} message - Message
-   * @param {object} data - Données additionnelles
-   */
-  success(module, message, data = {}) {
-    this.log(module, message, data, 'success');
-  }
-  
-  /**
-   * Log de debug (uniquement en mode développement)
-   * @param {string} module - Nom du module
-   * @param {string} message - Message
-   * @param {object} data - Données additionnelles
-   */
-  debug(module, message, data = {}) {
-    this.log(module, message, data, 'debug');
-  }
-  
-  /**
-   * Récupère l'historique des logs
-   * @param {string} level - Filtrer par niveau (optionnel)
-   * @param {string} module - Filtrer par module (optionnel)
-   * @returns {Array} Logs filtrés
-   */
-  getHistory(level = null, module = null) {
-    let history = [...this.logHistory];
-    
-    if (level) {
-      history = history.filter(log => log.level === level);
-    }
-    
-    if (module) {
-      history = history.filter(log => log.module === module);
-    }
-    
-    return history;
-  }
-  
-  /**
-   * Récupère les erreurs uniquement
-   * @returns {Array} Logs d'erreurs
-   */
-  getErrors() {
-    return this.getHistory('error');
-  }
-  
-  /**
-   * Efface l'historique
-   */
-  clearHistory() {
-    this.logHistory = [];
-    this.info('Logger', 'Historique effacé');
-  }
-  
-  /**
-   * Active/désactive le logger
-   * @param {boolean} enabled - true pour activer
-   */
-  setEnabled(enabled) {
-    this.enabled = enabled;
-    console.log(`Logger ${enabled ? 'activé' : 'désactivé'}`);
-  }
-  
-  /**
-   * Exporte les logs en format JSON
-   * @returns {string} Logs au format JSON
-   */
-  exportLogs() {
-    try {
-      return JSON.stringify(this.logHistory, null, 2);
-    } catch (err) {
-      console.error('Erreur export logs:', err);
+      console.error('[Logger] Erreur export:', err);
       return null;
-    }
-  }
-  
-  /**
-   * Télécharge les logs dans un fichier
-   */
-  downloadLogs() {
-    try {
-      const logsJson = this.exportLogs();
-      if (!logsJson) return;
-      
-      const blob = new Blob([logsJson], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      
-      link.href = url;
-      link.download = `logs-${new Date().toISOString()}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      
-      this.success('Logger', 'Logs téléchargés');
-      
-    } catch (err) {
-      this.error('Logger', 'Erreur téléchargement logs', err);
     }
   }
 }
 
-// Créer une instance unique (singleton)
-const logger = new Logger();
-
-// Exporter l'instance
-export default logger;
+// Export
+export { Logger };

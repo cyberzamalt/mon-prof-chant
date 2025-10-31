@@ -1,159 +1,146 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Mon Professeur de Chant – v2</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mon Professeur de Chant – v2 clean</title>
   <style>
     :root{
-      --bg:#0b0f16; --panel:#111726; --card:#121a2b; --grid:#1a2742;
-      --text:#e6e8ee; --muted:#9aa3b2; --ok:#166534; --danger:#d33; --accent:#3b82f6;
-      --bd:#263347; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      --bg:#0c1420; --panel:#111a28; --grid:#1a2642; --text:#e5e7eb;
+      --muted:#9ca3af; --ok:#10b981; --err:#ef4444; --accent:#22c55e;
+      --border:#22304e; --axis:#2a3b63;
     }
-    *{box-sizing:border-box} html,body{height:100%;margin:0}
-    body{background:var(--bg); color:var(--text); font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif}
-    header{padding:18px 20px; text-align:center; border-bottom:1px solid var(--bd); background:var(--panel)}
-    h1{margin:0; font-size:22px; color:#37d770}
-    main{max-width:1200px;margin:24px auto; padding:0 16px}
-    .bar{display:flex; gap:10px; flex-wrap:wrap; align-items:center; background:var(--panel); border:1px solid var(--bd); padding:12px; border-radius:12px}
-    .btn{border:1px solid transparent; border-radius:10px; padding:10px 14px; font-weight:600; cursor:pointer}
-    .btn:disabled{opacity:.6; cursor:not-allowed}
-    .b-ok{background:var(--ok); color:#fff}
-    .b-stop{background:var(--danger); color:#fff}
-    .b-sec{background:#21304a; color:#dfe7f6; border-color:#2a3a58}
-    .b-ghost{background:transparent; color:#c9d4e8; border-color:#3a4a66}
-    .grid{display:grid; gap:18px}
-    @media(min-width:900px){ .grid{grid-template-columns:1fr 1fr} }
-    .panel{background:var(--panel); border:1px solid var(--bd); border-radius:14px; padding:14px}
-    .ph{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px}
-    .ph h3{margin:0; font-size:15px}
-    .status{font-size:12px; color:#9fb0c9}
-    canvas{display:block; width:100%; height:360px; background:#05080f; border:1px solid var(--bd); border-radius:10px}
-    .info{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px}
-    .infobox{background:#0d1422; border:1px solid var(--bd); border-radius:8px; padding:8px; text-align:center}
-    .lbl{font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em}
-    .val{font-family:var(--mono); font-weight:700}
-    .note{margin-top:6px; color:var(--muted); font-size:12px}
-    .toast{position:fixed; right:16px; top:16px; background:#0d1422; border:1px solid var(--bd); padding:12px 14px; border-radius:10px; display:none}
-    .toast.show{display:block}
+    *{box-sizing:border-box} html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Arial,sans-serif}
+    .wrap{max-width:1100px;margin:32px auto;padding:0 16px}
+    .topbar{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+    .btn{border:1px solid var(--border);background:#152036;color:var(--text);padding:8px 12px;border-radius:8px;cursor:pointer}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn.ok{background:var(--accent);color:#04110a;border-color:#0b3}
+    .btn.danger{background:#b91c1c;border-color:#7f1d1d}
+    .btn.secondary{background:#1b2744}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px}
+    .card h3{margin:0 0 10px 0;font-size:15px;color:#9cc1ff}
+    .status{font-size:12px;color:var(--muted)}
+    canvas{width:100%;height:320px;background:#0a1224;border:1px solid var(--border);border-radius:8px;display:block}
+    .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+    .metric{background:#0e1a33;border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center}
+    .metric b{display:block;font-size:18px}
+    .toolbar{display:flex;justify-content:space-between;align-items:center;margin:6px 0 10px 0}
+    .hidden{display:none!important}
+    .note{color:var(--muted);font-size:12px}
   </style>
 </head>
 <body>
-  <header>
-    <h1>🎤 Mon Professeur de Chant</h1>
-    <div class="note">Analyse vocale en temps réel • v2 clean</div>
-  </header>
-
-  <main>
-    <div class="bar">
-      <button id="btnStart" class="btn b-ok" onclick="handleStart()">▶️ Démarrer</button>
-      <button id="btnStop" class="btn b-stop" onclick="handleStop()" disabled>⏹️ Arrêter</button>
-      <button id="btnRec" class="btn b-sec" onclick="handleRecord()" disabled>⏺️ Enregistrer</button>
-      <button class="btn b-ghost" onclick="handleClear()">🗑️ Effacer</button>
-      <span class="note" id="statusMsg">Prêt.</span>
+  <div class="wrap">
+    <div class="topbar">
+      <button id="btnStart" class="btn ok">▶️ Démarrer</button>
+      <button id="btnStop" class="btn danger" disabled>⏹️ Arrêter</button>
+      <button id="btnRec" class="btn secondary" disabled>⏺️ Enregistrer</button>
+      <button id="btnClear" class="btn">🗑️ Effacer</button>
+      <span id="appStatus" class="status">Prêt.</span>
     </div>
 
-    <div class="grid">
-      <section class="panel" id="panel-recording">
-        <div class="ph">
+    <div class="row">
+      <div class="card">
+        <div class="toolbar">
           <h3>Enregistrement Live</h3>
-          <button class="btn b-ghost" id="dlLive" onclick="downloadLive()" disabled>⬇️ Télécharger MP3</button>
+          <a id="dlLive" class="btn secondary hidden" download="live.mp3">💾 Télécharger MP3</a>
         </div>
-        <canvas id="canvas-recording" width="1200" height="360"></canvas>
-        <div class="info">
-          <div class="infobox"><div class="lbl">Fréquence</div><div class="val" id="freq-recording">—</div></div>
-          <div class="infobox"><div class="lbl">Note</div><div class="val" id="note-recording">—</div></div>
-          <div class="infobox"><div class="lbl">Cents</div><div class="val" id="cents-recording">—</div></div>
+        <canvas id="canvas-recording" width="520" height="320"></canvas>
+        <div class="metrics">
+          <div class="metric"><span>FRÉQUENCE</span><b id="mFreq">—</b></div>
+          <div class="metric"><span>NOTE</span><b id="mNote">—</b></div>
+          <div class="metric"><span>CENTS</span><b id="mCents">—</b></div>
         </div>
-      </section>
+      </div>
 
-      <section class="panel" id="panel-reference">
-        <div class="ph">
+      <div class="card">
+        <div class="toolbar">
           <h3>Référence Audio</h3>
-          <button class="btn b-ghost" id="dlRef" onclick="downloadRef()" disabled>⬇️ Télécharger MP3</button>
+          <a id="dlRef" class="btn secondary hidden" download="reference.mp3">💾 Télécharger MP3</a>
         </div>
-        <canvas id="canvas-reference" width="1200" height="360"></canvas>
-        <div class="info">
-          <div class="infobox"><div class="lbl">Fréquence</div><div class="val" id="freq-reference">—</div></div>
-          <div class="infobox"><div class="lbl">Note</div><div class="val" id="note-reference">—</div></div>
-          <div class="infobox"><div class="lbl">Cents</div><div class="val" id="cents-reference">—</div></div>
-        </div>
-      </section>
+        <canvas id="canvas-reference" width="520" height="320"></canvas>
+        <p class="note">À venir : chargement d’un MP3/Youtube pour comparer visuellement.</p>
+      </div>
     </div>
-  </main>
+  </div>
 
-  <div id="toast" class="toast"></div>
-
-  <!-- Dépendances externes requises -->
+  <!-- Librairies “non modules” -->
   <script src="src/vendor/yin-detector.js"></script>
   <script src="src/utils/pitch-smoothing.js"></script>
   <script src="src/vendor/lame.min.js"></script>
 
-  <!-- App v2 -->
+  <!-- App (modules) -->
   <script type="module">
     import app from './src/app.js';
-    window.appInstance = app;
 
-    const T = (msg, type='info')=>{
-      const el = document.getElementById('toast');
-      el.className = 'toast show';
-      el.textContent = msg;
-      setTimeout(()=>el.classList.remove('show'), 2200);
+    const $ = (id) => document.getElementById(id);
+    const btnStart = $('btnStart'), btnStop = $('btnStop'), btnRec = $('btnRec'), btnClear = $('btnClear');
+    const status = $('appStatus');
+    const dlLive = $('dlLive');
+    const liveCanvas = $('canvas-recording');
+    const refCanvas  = $('canvas-reference');
+
+    // Handlers visibles globalement – pas de jQuery, pas de .ready()
+    btnStart.onclick = async () => {
+      try {
+        status.textContent = 'Démarrage...';
+        await app.start();                 // init context + micro
+        app.getPanel('recording')?.start(liveCanvas);
+        app.getPanel('reference')?.start(refCanvas);
+        btnStart.disabled = true; btnStop.disabled = false; btnRec.disabled = false;
+        status.textContent = 'Micro actif.';
+      } catch (e) {
+        console.error(e);
+        status.textContent = 'Erreur de démarrage.';
+        alert('Erreur: ' + (e?.message || e));
+      }
     };
 
-    window.handleStart = async ()=>{
-      try{
-        await app.start();
-        document.getElementById('btnStart').disabled = true;
-        document.getElementById('btnStop').disabled = false;
-        document.getElementById('btnRec').disabled = false;
-        T('Micro démarré.'); 
-      }catch(e){ T('Erreur: '+(e?.message||e), 'err'); }
+    btnStop.onclick = () => {
+      try {
+        app.stop();
+        btnStart.disabled = false; btnStop.disabled = true; btnRec.disabled = true;
+        status.textContent = 'Arrêté.';
+      } catch (e) {
+        console.error(e);
+        alert('Erreur: ' + (e?.message || e));
+      }
     };
 
-    window.handleStop = ()=>{
-      app.stop();
-      document.getElementById('btnStart').disabled = false;
-      document.getElementById('btnStop').disabled = true;
-      document.getElementById('btnRec').disabled = true;
-      T('Arrêté.');
+    btnRec.onclick = async () => {
+      try {
+        if (app.getService('recording')?.isRecording()) {
+          const data = await app.getService('recording').stop();
+          status.textContent = `Enregistrement arrêté (${(data?.duration/1000).toFixed(2)}s)`;
+          if (data?.mp3Blob) {
+            dlLive.classList.remove('hidden');
+            dlLive.href = URL.createObjectURL(data.mp3Blob);
+          }
+          btnRec.textContent = '⏺️ Enregistrer';
+        } else {
+          await app.getService('recording').start();
+          status.textContent = 'Enregistrement en cours...';
+          btnRec.textContent = '⏹️ Arrêter Enreg.';
+        }
+      } catch (e) {
+        console.error(e);
+        alert('Erreur: ' + (e?.message || e));
+      }
     };
 
-    window.handleRecord = async ()=>{
-      try{
-        const started = await app.toggleRecord(); // start/stop
-        document.getElementById('btnRec').textContent = started ? '⏹️ Arrêter Enreg.' : '⏺️ Enregistrer';
-        document.getElementById('dlLive').disabled = !app.hasRecording();
-        T(started?'Enregistrement démarré.':'Enregistrement arrêté.');
-      }catch(e){ T('Erreur: '+(e?.message||e), 'err'); }
+    btnClear.onclick = () => {
+      app.getPanel('recording')?.clear();
+      app.getPanel('reference')?.clear();
+      status.textContent = 'Effacé.';
     };
 
-    window.handleClear = ()=>{
-      app.clearPanels();
-      T('Tracés effacés.');
-    };
-
-    window.downloadLive = async ()=>{
-      const file = await app.getLastMp3('live');
-      if(!file) return T('Aucun enregistrement.');
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(file.blob);
-      a.download = file.name;
-      a.click();
-      URL.revokeObjectURL(a.href);
-      T('MP3 téléchargé.');
-    };
-
-    window.downloadRef = async ()=>{
-      const file = await app.getLastMp3('ref');
-      if(!file) return T('Aucune référence.');
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(file.blob);
-      a.download = file.name;
-      a.click();
-      URL.revokeObjectURL(a.href);
-      T('MP3 référence téléchargé.');
-    };
+    // Au chargement du DOM, on initialise l’app (sans lancer le micro)
+    document.addEventListener('DOMContentLoaded', async () => {
+      try { await app.init(); } catch(e){ console.error(e); }
+    });
   </script>
 </body>
 </html>

@@ -1,48 +1,52 @@
 // src/audio/core/MicrophoneManager.js
-// Partage le même AudioContext (AudioEngine) et s’assure qu’il est prêt avant d’ouvrir le micro.
+// Utilise le même AudioContext que l’AudioEngine (singleton) et gère tous les cas.
 
 import { Logger } from '../../logging/Logger.js';
 import { AudioEngine } from './AudioEngine.js';
 
 class MicrophoneManager {
   constructor(options = {}) {
-    this.constraints = options.constraints || {
-      audio: {
-        channelCount: 1,
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-        // sampleRate: 48000, // optionnel (ne pas forcer tant que tout marche)
-      }
-    };
     this.stream = null;
     this.source = null;
+    this.constraints = options.constraints || { audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
+  }
+
+  async #ensureContext() {
+    const engine = AudioEngine.getInstance();
+
+    // Essaie d’obtenir le contexte via propriété OU getter (selon ton AudioEngine)
+    let ctx = engine.context || (typeof engine.getContext === 'function' ? engine.getContext() : null);
+
+    if (!ctx || ctx.state === 'closed') {
+      Logger.warn('[MicrophoneManager] AudioContext absent → init()');
+      await engine.init(); // peut logguer "Déjà initialisé"
+      ctx = engine.context || (typeof engine.getContext === 'function' ? engine.getContext() : null);
+    }
+    if (!ctx) throw new Error('AudioContext non disponible');
+    return ctx;
   }
 
   async start() {
     try {
-      const engine = AudioEngine.getInstance();
+      const ctx = await this.#ensureContext();
 
-      // ✅ Assurer que l’AudioContext existe (au cas où)
-      if (!engine.context || engine.context.state === 'closed') {
-        Logger.warn('[MicrophoneManager] AudioContext manquant → init()');
-        await engine.init();
-      }
-      const ctx = engine.context;
-      if (!ctx) throw new Error('AudioContext non disponible');
+      // Aligne le sampleRate d’acquisition sur celui du contexte (évite le mismatch FF/Chrome)
+      const alignedConstraints = structuredClone(this.constraints);
+      alignedConstraints.audio = alignedConstraints.audio || {};
+      alignedConstraints.audio.sampleRate = ctx.sampleRate;
 
-      Logger.info('[MicrophoneManager] Demande accès microphone...', this.constraints);
-      const stream = await navigator.mediaDevices.getUserMedia(this.constraints);
-      this.stream = stream;
+      Logger.info('[MicrophoneManager] Demande accès microphone...', alignedConstraints);
+      const stream = await navigator.mediaDevices.getUserMedia(alignedConstraints);
       Logger.info('[MicrophoneManager] Accès microphone accordé');
 
-      // ✅ Chemin robuste Firefox/Chrome
+      this.stream = stream;
+
+      // Création de la source dans LE MÊME contexte
       this.source = ctx.createMediaStreamSource(stream);
 
       Logger.info('[MicrophoneManager] Source créée', {
         contextSampleRate: ctx.sampleRate,
-        trackSampleRateHint:
-          stream.getAudioTracks()?.[0]?.getSettings?.()?.sampleRate || 'n/a'
+        trackRate: stream.getAudioTracks()?.[0]?.getSettings?.()?.sampleRate || 'n/a'
       });
 
       return { stream: this.stream, source: this.source };

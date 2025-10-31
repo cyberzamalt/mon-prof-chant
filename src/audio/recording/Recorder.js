@@ -1,454 +1,413 @@
 /**
  * Recorder.js
- * TYPE: Recording
+ * Gestionnaire d'enregistrement audio avec MediaRecorder
  * 
  * Responsabilités:
- * - Enregistrer l'audio du microphone
- * - Gérer MediaRecorder
- * - Convertir WebM → WAV → MP3
- * - Déclencher les événements (start, stop, error)
+ * - Enregistrer le flux audio du microphone
+ * - Gérer MediaRecorder API
+ * - Supporter plusieurs formats (WebM, WAV)
+ * - Fallbacks pour compatibilité navigateurs
+ * - Gestion de la qualité et du bitrate
  * 
- * Dépendances: Logger, AudioEngine, AudioBus
+ * Dépendances:
+ * - Logger
  */
 
 import { Logger } from '../../logging/Logger.js';
-import { AudioEngine } from '../core/AudioEngine.js';
-import { AudioBus } from '../core/AudioBus.js';
 
 export class Recorder {
-  constructor(audioEngine, audioBus) {
-    this.logger = new Logger('Recorder');
-    this.audioEngine = audioEngine;
-    this.audioBus = audioBus;
-    
-    this.mediaRecorder = null;
-    this.micStream = null;
-    this.chunks = [];
-    this.lastBlob = null;
-    this.isRecording = false;
-    this.startTime = 0;
-    this.recordingDuration = 0;
-    
-    this.logger.info('Recorder initialized');
+  #stream = null;
+  #mediaRecorder = null;
+  #chunks = [];
+  #options = null;
+  #isRecording = false;
+  #startTime = null;
+  #mimeType = null;
+
+  /**
+   * Constructeur
+   * @param {MediaStream} stream - Stream audio du microphone
+   * @param {Object} options - Options d'enregistrement
+   */
+  constructor(stream, options = {}) {
+    try {
+      if (!stream || !(stream instanceof MediaStream)) {
+        throw new Error('[Recorder] MediaStream requis');
+      }
+
+      this.#stream = stream;
+
+      // Options par défaut
+      this.#options = {
+        mimeType: 'audio/webm',
+        audioBitsPerSecond: 128000, // 128 kbps
+        ...options
+      };
+
+      // Déterminer le meilleur mimeType supporté
+      this.#mimeType = this.#getBestMimeType();
+
+      Logger.info('Recorder', 'Initialisé', {
+        mimeType: this.#mimeType,
+        bitrate: this.#options.audioBitsPerSecond
+      });
+
+    } catch (err) {
+      Logger.error('Recorder', 'Erreur constructeur', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Déterminer le meilleur mimeType supporté
+   * @private
+   * @returns {string}
+   */
+  #getBestMimeType() {
+    try {
+      const preferredTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        'audio/wav'
+      ];
+
+      // Tester chaque type dans l'ordre de préférence
+      for (const type of preferredTypes) {
+        if (MediaRecorder.isTypeSupported(type)) {
+          Logger.info('Recorder', `MimeType supporté: ${type}`);
+          return type;
+        }
+      }
+
+      // Fallback
+      Logger.warn('Recorder', 'Aucun mimeType préféré supporté, utilisation par défaut');
+      return this.#options.mimeType || 'audio/webm';
+
+    } catch (err) {
+      Logger.error('Recorder', 'Erreur getBestMimeType', err);
+      return 'audio/webm';
+    }
   }
 
   /**
    * Démarrer l'enregistrement
+   * @returns {Promise<void>}
    */
-  async startRecording() {
+  async start() {
     try {
-      // Vérifier que l'audio est prêt
-      if (!this.audioEngine.audioCtx) {
-        await this.audioEngine.ensureAudioContext();
+      Logger.info('Recorder', 'Démarrage...');
+
+      if (this.#isRecording) {
+        Logger.warn('Recorder', 'Déjà en cours');
+        return;
       }
 
-      // Demander l'accès au microphone
-      if (!this.micStream) {
-        this.micStream = await this.audioEngine.requestMicrophoneAccess();
+      // Vérifier support MediaRecorder
+      if (!window.MediaRecorder) {
+        throw new Error('MediaRecorder non supporté par ce navigateur');
       }
 
-      // Réinitialiser
-      this.chunks = [];
-      this.lastBlob = null;
-      this.isRecording = true;
-      this.startTime = Date.now();
-
-      // Créer le MediaRecorder
-      const options = {
-        mimeType: this.getSupportedMimeType(),
-        audioBitsPerSecond: 128000
+      // Créer MediaRecorder
+      const recorderOptions = {
+        mimeType: this.#mimeType,
+        audioBitsPerSecond: this.#options.audioBitsPerSecond
       };
 
-      this.mediaRecorder = new MediaRecorder(this.micStream, options);
+      this.#mediaRecorder = new MediaRecorder(this.#stream, recorderOptions);
 
-      // Événement : données disponibles
-      this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          this.chunks.push(event.data);
-          this.logger.debug('Recording data chunk', { size: event.data.size });
+      // Initialiser le buffer de chunks
+      this.#chunks = [];
+
+      // Événement: données disponibles
+      this.#mediaRecorder.ondataavailable = (event) => {
+        try {
+          if (event.data && event.data.size > 0) {
+            this.#chunks.push(event.data);
+            Logger.debug('Recorder', `Chunk reçu: ${event.data.size} bytes`);
+          }
+        } catch (err) {
+          Logger.error('Recorder', 'Erreur ondataavailable', err);
         }
       };
 
-      // Événement : enregistrement arrêté
-      this.mediaRecorder.onstop = () => {
-        if (this.chunks.length > 0) {
-          this.lastBlob = new Blob(this.chunks, { 
-            type: this.getSupportedMimeType() 
-          });
-          this.logger.info('Recording stopped', { 
-            totalSize: this.lastBlob.size,
-            duration: this.recordingDuration 
-          });
-          this.audioBus.publish('recording:stopped', { 
-            blob: this.lastBlob,
-            duration: this.recordingDuration 
-          });
-        } else {
-          this.logger.warn('No audio data recorded');
-        }
+      // Événement: erreur
+      this.#mediaRecorder.onerror = (event) => {
+        Logger.error('Recorder', 'Erreur MediaRecorder', event.error);
       };
 
-      // Événement : erreur
-      this.mediaRecorder.onerror = (event) => {
-        this.logger.error('MediaRecorder error', { error: event.error });
-        this.audioBus.publish('recording:error', { error: event.error });
+      // Événement: arrêt
+      this.#mediaRecorder.onstop = () => {
+        Logger.info('Recorder', 'MediaRecorder arrêté');
       };
 
-      // Démarrer
-      this.mediaRecorder.start(100); // Événement tous les 100ms
+      // Démarrer l'enregistrement
+      this.#mediaRecorder.start(100); // Chunk toutes les 100ms
+      this.#startTime = Date.now();
+      this.#isRecording = true;
 
-      this.logger.info('Recording started', {
-        mimeType: options.mimeType,
-        bitrate: options.audioBitsPerSecond
-      });
-
-      this.audioBus.publish('recording:started', {
-        timestamp: this.startTime
+      Logger.info('Recorder', 'Enregistrement démarré', {
+        mimeType: this.#mediaRecorder.mimeType,
+        state: this.#mediaRecorder.state
       });
 
     } catch (err) {
-      this.logger.error('Failed to start recording', { error: err.message });
-      this.audioBus.publish('recording:error', { error: err.message });
+      Logger.error('Recorder', 'Erreur start', err);
       throw err;
     }
   }
 
   /**
    * Arrêter l'enregistrement
+   * @returns {Promise<Object>} Données de l'enregistrement
    */
-  stopRecording() {
+  async stop() {
     try {
-      if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-        this.recordingDuration = (Date.now() - this.startTime) / 1000;
-        this.mediaRecorder.stop();
-        this.isRecording = false;
-        this.logger.info('Recording stop requested');
+      Logger.info('Recorder', 'Arrêt...');
+
+      if (!this.#isRecording) {
+        Logger.warn('Recorder', 'Aucun enregistrement en cours');
+        return null;
+      }
+
+      return new Promise((resolve, reject) => {
+        try {
+          // Callback une fois arrêté
+          this.#mediaRecorder.onstop = () => {
+            try {
+              // Créer le blob à partir des chunks
+              const blob = new Blob(this.#chunks, {
+                type: this.#mimeType
+              });
+
+              // Calculer durée
+              const endTime = Date.now();
+              const duration = endTime - this.#startTime;
+
+              // Résultat
+              const result = {
+                blob: blob,
+                size: blob.size,
+                duration: duration,
+                mimeType: this.#mimeType,
+                chunks: this.#chunks.length,
+                startTime: this.#startTime,
+                endTime: endTime
+              };
+
+              // Réinitialiser
+              this.#isRecording = false;
+              this.#chunks = [];
+
+              Logger.info('Recorder', 'Enregistrement terminé', {
+                duration: `${(duration / 1000).toFixed(2)}s`,
+                size: `${(blob.size / 1024).toFixed(2)} KB`,
+                chunks: result.chunks
+              });
+
+              resolve(result);
+
+            } catch (err) {
+              Logger.error('Recorder', 'Erreur dans onstop callback', err);
+              reject(err);
+            }
+          };
+
+          // Arrêter le recorder
+          if (this.#mediaRecorder.state !== 'inactive') {
+            this.#mediaRecorder.stop();
+          } else {
+            // Déjà arrêté, résoudre immédiatement
+            this.#mediaRecorder.onstop();
+          }
+
+        } catch (err) {
+          Logger.error('Recorder', 'Erreur stop', err);
+          reject(err);
+        }
+      });
+
+    } catch (err) {
+      Logger.error('Recorder', 'Erreur stop (outer)', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Mettre en pause
+   */
+  pause() {
+    try {
+      if (!this.#isRecording) {
+        Logger.warn('Recorder', 'Aucun enregistrement en cours');
+        return;
+      }
+
+      if (this.#mediaRecorder.state === 'recording') {
+        this.#mediaRecorder.pause();
+        Logger.info('Recorder', 'Enregistrement en pause');
       } else {
-        this.logger.warn('No recording in progress');
+        Logger.warn('Recorder', `État invalide pour pause: ${this.#mediaRecorder.state}`);
       }
+
     } catch (err) {
-      this.logger.error('Failed to stop recording', { error: err.message });
-      this.audioBus.publish('recording:error', { error: err.message });
+      Logger.error('Recorder', 'Erreur pause', err);
     }
   }
 
   /**
-   * Pause l'enregistrement
+   * Reprendre
    */
-  pauseRecording() {
+  resume() {
     try {
-      if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-        this.mediaRecorder.pause();
-        this.logger.info('Recording paused');
-        this.audioBus.publish('recording:paused', {});
-      }
-    } catch (err) {
-      this.logger.error('Failed to pause recording', { error: err.message });
-    }
-  }
-
-  /**
-   * Reprendre l'enregistrement
-   */
-  resumeRecording() {
-    try {
-      if (this.mediaRecorder && this.mediaRecorder.state === 'paused') {
-        this.mediaRecorder.resume();
-        this.logger.info('Recording resumed');
-        this.audioBus.publish('recording:resumed', {});
-      }
-    } catch (err) {
-      this.logger.error('Failed to resume recording', { error: err.message });
-    }
-  }
-
-  /**
-   * Obtenir le dernier enregistrement (blob)
-   */
-  getLastRecording() {
-    return this.lastBlob;
-  }
-
-  /**
-   * Effacer les données
-   */
-  clearRecording() {
-    this.chunks = [];
-    this.lastBlob = null;
-    this.recordingDuration = 0;
-    this.logger.info('Recording cleared');
-  }
-
-  /**
-   * Télécharger l'enregistrement (WebM brut)
-   */
-  downloadWebM(filename = 'recording.webm') {
-    if (!this.lastBlob) {
-      this.logger.warn('No recording to download');
-      return;
-    }
-
-    const url = URL.createObjectURL(this.lastBlob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    this.logger.info('Downloaded WebM', { filename });
-  }
-
-  /**
-   * Convertir en WAV
-   * Utilise le worker d'export WAV
-   */
-  async downloadWAV(filename = 'recording.wav') {
-    try {
-      if (!this.lastBlob) {
-        this.logger.warn('No recording to convert to WAV');
+      if (!this.#isRecording) {
+        Logger.warn('Recorder', 'Aucun enregistrement en cours');
         return;
       }
 
-      // Vérifier que WAVExport est disponible
-      if (!window.WAVExport) {
-        this.logger.error('WAVExport not available');
-        this.audioBus.publish('export:error', { 
-          error: 'WAVExport module not loaded' 
-        });
-        return;
+      if (this.#mediaRecorder.state === 'paused') {
+        this.#mediaRecorder.resume();
+        Logger.info('Recorder', 'Enregistrement repris');
+      } else {
+        Logger.warn('Recorder', `État invalide pour resume: ${this.#mediaRecorder.state}`);
       }
-
-      this.logger.info('Converting to WAV...');
-      this.audioBus.publish('export:progress', { status: 'converting' });
-
-      const wav = await window.WAVExport.fromWebM(this.lastBlob);
-
-      if (!wav) {
-        throw new Error('WAV conversion failed');
-      }
-
-      // Télécharger
-      const url = URL.createObjectURL(wav);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      this.logger.info('Downloaded WAV', { filename });
-      this.audioBus.publish('export:success', { format: 'WAV' });
 
     } catch (err) {
-      this.logger.error('WAV conversion error', { error: err.message });
-      this.audioBus.publish('export:error', { error: err.message });
+      Logger.error('Recorder', 'Erreur resume', err);
     }
-  }
-
-  /**
-   * Convertir en MP3
-   * Utilise le worker d'export MP3
-   */
-  async downloadMP3(filename = 'recording.mp3') {
-    try {
-      if (!this.lastBlob) {
-        this.logger.warn('No recording to convert to MP3');
-        return;
-      }
-
-      // Vérifier que les modules sont disponibles
-      if (!window.WAVExport || !window.MP3Export) {
-        this.logger.error('MP3Export or WAVExport not available');
-        this.audioBus.publish('export:error', { 
-          error: 'Export modules not loaded' 
-        });
-        return;
-      }
-
-      this.logger.info('Converting to MP3...');
-      this.audioBus.publish('export:progress', { status: 'converting' });
-
-      // D'abord convertir en WAV
-      const wav = await window.WAVExport.fromWebM(this.lastBlob);
-      if (!wav) throw new Error('WAV conversion failed');
-
-      // Ensuite MP3
-      this.logger.info('Encoding MP3...');
-      this.audioBus.publish('export:progress', { status: 'encoding' });
-
-      const mp3 = await window.MP3Export.fromWav(wav);
-
-      if (!mp3) {
-        throw new Error('MP3 encoding failed');
-      }
-
-      // Télécharger
-      const url = URL.createObjectURL(mp3);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      this.logger.info('Downloaded MP3', { filename });
-      this.audioBus.publish('export:success', { format: 'MP3' });
-
-    } catch (err) {
-      this.logger.error('MP3 conversion error', { error: err.message });
-      this.audioBus.publish('export:error', { error: err.message });
-    }
-  }
-
-  /**
-   * Charger un fichier audio (upload)
-   */
-  async loadAudioFile(file) {
-    try {
-      if (!file) {
-        this.logger.warn('No file provided');
-        return null;
-      }
-
-      this.logger.info('Loading audio file', { 
-        name: file.name, 
-        size: file.size,
-        type: file.type 
-      });
-
-      const arrayBuffer = await file.arrayBuffer();
-      const blob = new Blob([arrayBuffer], { type: file.type });
-
-      this.lastBlob = blob;
-      this.chunks = [blob];
-
-      this.logger.info('Audio file loaded successfully');
-      this.audioBus.publish('recording:loaded', {
-        filename: file.name,
-        size: file.size
-      });
-
-      return blob;
-
-    } catch (err) {
-      this.logger.error('Failed to load audio file', { error: err.message });
-      this.audioBus.publish('recording:error', { error: err.message });
-      return null;
-    }
-  }
-
-  /**
-   * Décoder le blob en AudioBuffer (pour analyse)
-   */
-  async decodeToAudioBuffer() {
-    try {
-      if (!this.lastBlob) {
-        this.logger.warn('No recording to decode');
-        return null;
-      }
-
-      const arrayBuffer = await this.lastBlob.arrayBuffer();
-      const audioBuffer = await this.audioEngine.audioCtx.decodeAudioData(arrayBuffer);
-
-      this.logger.info('Audio decoded', {
-        duration: audioBuffer.duration,
-        sampleRate: audioBuffer.sampleRate,
-        channels: audioBuffer.numberOfChannels
-      });
-
-      return audioBuffer;
-
-    } catch (err) {
-      this.logger.error('Failed to decode audio', { error: err.message });
-      return null;
-    }
-  }
-
-  /**
-   * Obtenir un channel audio en Float32Array
-   */
-  async getAudioChannelData(channelIndex = 0) {
-    try {
-      const audioBuffer = await this.decodeToAudioBuffer();
-      if (!audioBuffer) return null;
-
-      const channelData = audioBuffer.getChannelData(channelIndex);
-      this.logger.debug('Got channel data', {
-        channel: channelIndex,
-        samples: channelData.length
-      });
-
-      return channelData;
-
-    } catch (err) {
-      this.logger.error('Failed to get channel data', { error: err.message });
-      return null;
-    }
-  }
-
-  /**
-   * Déterminer le MIME type supporté
-   */
-  getSupportedMimeType() {
-    const types = [
-      'audio/webm;codecs=opus',
-      'audio/webm;codecs=vp8',
-      'audio/webm',
-      'audio/ogg;codecs=opus',
-      'audio/mp4'
-    ];
-
-    for (const type of types) {
-      if (MediaRecorder.isTypeSupported(type)) {
-        this.logger.debug('Using MIME type', { type });
-        return type;
-      }
-    }
-
-    // Fallback
-    return 'audio/webm';
   }
 
   /**
    * Obtenir l'état actuel
+   * @returns {string} 'inactive', 'recording', 'paused'
    */
   getState() {
-    return {
-      isRecording: this.isRecording,
-      hasRecording: !!this.lastBlob,
-      recordingSize: this.lastBlob?.size || 0,
-      recordingDuration: this.recordingDuration,
-      recorderState: this.mediaRecorder?.state || 'inactive'
-    };
+    try {
+      if (!this.#mediaRecorder) {
+        return 'inactive';
+      }
+      return this.#mediaRecorder.state;
+    } catch (err) {
+      Logger.error('Recorder', 'Erreur getState', err);
+      return 'inactive';
+    }
+  }
+
+  /**
+   * Vérifier si un enregistrement est en cours
+   * @returns {boolean}
+   */
+  isRecording() {
+    return this.#isRecording;
+  }
+
+  /**
+   * Obtenir le mimeType utilisé
+   * @returns {string}
+   */
+  getMimeType() {
+    return this.#mimeType;
+  }
+
+  /**
+   * Obtenir les capacités du navigateur
+   * @static
+   * @returns {Object}
+   */
+  static getCapabilities() {
+    try {
+      if (!window.MediaRecorder) {
+        return {
+          supported: false,
+          types: []
+        };
+      }
+
+      const types = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/ogg',
+        'audio/mp4',
+        'audio/wav',
+        'audio/mpeg'
+      ];
+
+      const supportedTypes = types.filter(type => 
+        MediaRecorder.isTypeSupported(type)
+      );
+
+      return {
+        supported: true,
+        types: supportedTypes,
+        preferredType: supportedTypes[0] || 'audio/webm'
+      };
+
+    } catch (err) {
+      Logger.error('Recorder', 'Erreur getCapabilities', err);
+      return {
+        supported: false,
+        types: [],
+        error: err.message
+      };
+    }
+  }
+
+  /**
+   * Obtenir la durée actuelle de l'enregistrement
+   * @returns {number} Durée en millisecondes
+   */
+  getCurrentDuration() {
+    try {
+      if (!this.#isRecording || !this.#startTime) {
+        return 0;
+      }
+      return Date.now() - this.#startTime;
+    } catch (err) {
+      Logger.error('Recorder', 'Erreur getCurrentDuration', err);
+      return 0;
+    }
+  }
+
+  /**
+   * Obtenir le nombre de chunks enregistrés
+   * @returns {number}
+   */
+  getChunkCount() {
+    return this.#chunks.length;
+  }
+
+  /**
+   * Obtenir la taille actuelle de l'enregistrement
+   * @returns {number} Taille en bytes
+   */
+  getCurrentSize() {
+    try {
+      return this.#chunks.reduce((total, chunk) => total + chunk.size, 0);
+    } catch (err) {
+      Logger.error('Recorder', 'Erreur getCurrentSize', err);
+      return 0;
+    }
   }
 
   /**
    * Nettoyer les ressources
    */
-  dispose() {
+  cleanup() {
     try {
-      if (this.mediaRecorder) {
-        if (this.mediaRecorder.state === 'recording') {
-          this.mediaRecorder.stop();
-        }
-        this.mediaRecorder = null;
+      if (this.#isRecording) {
+        this.stop();
       }
 
-      if (this.micStream) {
-        this.micStream.getTracks().forEach(track => track.stop());
-        this.micStream = null;
-      }
+      this.#mediaRecorder = null;
+      this.#chunks = [];
+      this.#stream = null;
 
-      this.chunks = [];
-      this.logger.info('Recorder disposed');
+      Logger.info('Recorder', 'Nettoyage effectué');
+
     } catch (err) {
-      this.logger.error('Error disposing recorder', { error: err.message });
+      Logger.error('Recorder', 'Erreur cleanup', err);
     }
   }
 }
-
-export default Recorder;

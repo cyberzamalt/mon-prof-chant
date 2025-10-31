@@ -1,277 +1,502 @@
-// src/app.js
-(function () {
-  "use strict";
+/**
+ * app.js
+ * Orchestrateur principal de l'application
+ * 
+ * Responsabilités:
+ * - Point d'entrée de l'application
+ * - Initialisation de tous les services
+ * - Création des panneaux UI
+ * - Connexion des événements globaux
+ * - Gestion du cycle de vie de l'application
+ * 
+ * Architecture:
+ * 1. Charger les dépendances externes (YIN, PitchSmoother)
+ * 2. Créer les services core (AudioEngine, EventBus, Logger)
+ * 3. Créer les services audio (Microphone, Pitch, Recording)
+ * 4. Créer les panneaux UI
+ * 5. Connecter les événements
+ * 6. Émettre app:ready
+ */
 
-  // ------- DOM -------
-  const logBox = document.getElementById("logBox");
-  const canvas = document.getElementById("canvasRec");
-  const ctx = canvas.getContext("2d");
-  const btnMic = document.getElementById("btnMic");
-  const btnRecStart = document.getElementById("btnRecStart");
-  const btnRecStop = document.getElementById("btnRecStop");
-  const btnScaleAbs = document.getElementById("btnScaleAbs");
-  const btnMode440 = document.getElementById("btnMode440");
-  const btnModeAuto = document.getElementById("btnModeAuto");
-  const badge = document.getElementById("pitchyStatus");
+import { Logger } from './logging/Logger.js';
+import { EventBus } from './core/EventBus.js';
+import { AudioEngine } from './audio/core/AudioEngine.js';
+import { MicrophoneManager } from './audio/core/MicrophoneManager.js';
+import { PitchAnalysisService } from './audio/services/PitchAnalysisService.js';
+import { RecordingService } from './audio/services/RecordingService.js';
+import { CentsCalculator } from './audio/analysis/CentsCalculator.js';
+import { PitchAnalysisPanel } from './ui/components/PitchAnalysisPanel.js';
+import { MESSAGES } from './config/uiSettings.js';
 
-  // ------- Log -------
-  function log(lvl, msg){
-    const t = new Date().toTimeString().slice(0,8);
-    logBox.textContent += `[${t}] [${lvl}] ${msg}\n`;
-    logBox.scrollTop = logBox.scrollHeight;
+/**
+ * Classe principale de l'application
+ */
+class App {
+  // Services core
+  #eventBus = null;
+  #audioEngine = null;
+  #logger = null;
+
+  // Services audio
+  #microphoneManager = null;
+  #pitchAnalysisService = null;
+  #recordingService = null;
+  #centsCalculator = null;
+
+  // Détecteurs externes
+  #yinDetector = null;
+  #pitchSmoother = null;
+
+  // Panneaux UI
+  #panels = {};
+
+  // État
+  #isInitialized = false;
+  #isStarted = false;
+
+  /**
+   * Constructeur
+   */
+  constructor() {
+    Logger.info('App', '🚀 Initialisation de l\'application...');
   }
 
-  // ------- State -------
-  let audioCtx = null;
-  let analyser = null;
-  let micStream = null;
-  let mediaRecorder = null;
-  let chunks = [];
-  let detector = null;
-  let smoother = null;
-  let rafId = 0;
-
-  // DSP (optionnels)
-  let hpf = null;
-  let gate = null;
-
-  // buffers réutilisés (pas d’alloc en boucle)
-  let bufRaw = null;
-  let bufHPF = null;
-  let bufGate = null;
-
-  // rendu
-  const points = []; // {t, hz}
-  const VISIBLE = 30; // s
-  const MIN_HZ = 60, MAX_HZ = 1200;
-  const DETECT_SIZE = 2048;
-
-  let scaleMode = "abs"; // 'abs' | 'a440' | 'auto'
-  const Y_RANGE_CENTS = 200;
-  // fenêtre large pour A440 (évite ligne collée en bas)
-  const A440_RANGE_CENTS = 3000; // ≈ ±2.5 octaves
-
-  // ------- Helpers -------
-  const hzToMidi = (hz) => 69 + 12 * Math.log2(hz / 440);
-  const clamp = (v, a, b) => (v < a ? a : (v > b ? b : v));
-
-  function centsFrom(hz, mode){
-    if (mode === "a440") return 1200 * Math.log2(hz / 440);
-    const midi = Math.round(hzToMidi(hz));
-    const baseHz = 440 * Math.pow(2, (midi - 69) / 12);
-    return 1200 * Math.log2(hz / baseHz);
-  }
-
-  function mapPitchToY(hz, h){
-    if (scaleMode === "abs") {
-      const MIDI_MIN = hzToMidi(MIN_HZ), MIDI_MAX = hzToMidi(MAX_HZ);
-      const top = 20, bottom = h - 40;
-      const n = clamp((hzToMidi(hz) - MIDI_MIN) / (MIDI_MAX - MIDI_MIN), 0, 1);
-      return bottom - n * (bottom - top);
-    } else {
-      // A440 = fenêtre large ; Auto = fenêtre serrée (±200 cents)
-      const range = (scaleMode === "a440") ? A440_RANGE_CENTS : Y_RANGE_CENTS;
-      const cents = clamp(centsFrom(hz, scaleMode), -range, range);
-      const H = h - 60; const mid = h / 2;
-      const pxPerCent = H / (2 * range);
-      return mid - cents * pxPerCent;
-    }
-  }
-
-  function fmtTime(secs){
-    const m = String(Math.floor(secs/60)).padStart(2,"0");
-    const s = String(Math.floor(secs%60)).padStart(2,"0");
-    return `${m}:${s}`;
-  }
-
-  // ------- Draw -------
-  const base = document.createElement("canvas"); base.width = canvas.width; base.height = canvas.height;
-  let lastSec = -1;
-
-  function drawBase(t0) {
-    const w = base.width, h = base.height; const b = base.getContext("2d");
-    b.clearRect(0,0,w,h);
-    b.fillStyle = "#0b1324"; b.fillRect(0,0,w,h);
-
-    // lignes
-    b.strokeStyle="#1a2642"; b.lineWidth=0.5;
-    for (let i=0;i<6;i++){ const y=(h-40)/5*i+20; b.beginPath(); b.moveTo(0,y); b.lineTo(w,y); b.stroke(); }
-    // ligne centrale
-    b.strokeStyle="#10b981"; b.setLineDash([4,4]); b.lineWidth=2;
-    b.beginPath(); b.moveTo(0,h/2); b.lineTo(w,h/2); b.stroke(); b.setLineDash([]);
-
-    // temps
-    const left=60, right=20, drawW=w-left-right;
-    const start = Math.floor(t0);
-    b.strokeStyle="#22304f"; b.lineWidth=0.5; b.fillStyle="#9ca3af"; b.font="10px monospace"; b.textAlign="center";
-    for (let s=start; s<=t0+VISIBLE; s+=1) {
-      const x = left + ((s - t0)/VISIBLE)*drawW;
-      if (x>=left && x<=w-right) {
-        b.beginPath(); b.moveTo(x,0); b.lineTo(x,h); b.stroke();
-        if (s%5===0) b.fillText(fmtTime(s), x, h-6);
-      }
-    }
-
-    // labels gauche
-    b.fillStyle="#9ca3af"; b.font="9px monospace"; b.textAlign="left";
-    const labels=['🔝 Très très aigu','Très aigu','Aigu','Moyen aigu','🎯 Milieu','Moyen grave','Grave','Très grave','🔻 Très très grave'];
-    const pos=[0.05,0.18,0.30,0.42,0.50,0.58,0.70,0.82,0.95];
-    for(let i=0;i<labels.length;i++){
-      const y = pos[i]*(h-60)+20;
-      b.fillText(labels[i],2,y+3);
-      b.strokeStyle="#2a3a54"; b.lineWidth=0.5;
-      b.beginPath(); b.moveTo(0,y); b.lineTo(58,y); b.stroke();
-    }
-  }
-
-  function draw(tNow){
-    const w=canvas.width, h=canvas.height, left=60,right=20,drawW=w-left-right;
-    const t0 = Math.max(0, tNow - VISIBLE);
-    if (Math.floor(t0) !== lastSec){ drawBase(t0); lastSec = Math.floor(t0); }
-
-    ctx.clearRect(0,0,w,h);
-    ctx.drawImage(base,0,0);
-
-    // points visibles
-    const vis = points.filter(p=>p.t>=t0);
-    if (!vis.length) return;
-
-    // courbe
-    ctx.strokeStyle=getComputedStyle(document.body).getPropertyValue('--blue').trim()||'#3b82f6';
-    ctx.lineWidth=3; ctx.lineJoin='round'; ctx.lineCap='round';
-    ctx.beginPath();
-    for (let i=0;i<vis.length;i++){
-      const x = left + ((vis[i].t - t0)/VISIBLE)*drawW;
-      const y = mapPitchToY(vis[i].hz, h);
-      if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-    }
-    ctx.stroke();
-  }
-
-  // ------- Audio -------
-  async function ensureAudio(){ 
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === "suspended") await audioCtx.resume();
-  }
-
-  async function activateMic(){
-    try{
-      await ensureAudio();
-      micStream = await navigator.mediaDevices.getUserMedia({
-        audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}
-      });
-      const src = audioCtx.createMediaStreamSource(micStream);
-      analyser = audioCtx.createAnalyser();
-      analyser.fftSize = DETECT_SIZE;
-      analyser.smoothingTimeConstant = 0;
-      src.connect(analyser);
-
-      // Détecteur + lisseur
-      if (typeof YinDetector === "undefined") {
-        badge.textContent = "Détecteur: ERREUR (yin-detector.js non chargé)";
-        badge.className = "badge err";
-        log("ERROR","YinDetector introuvable (vérifie chemin ./src/vendor/yin-detector.js)");
+  /**
+   * Initialiser l'application
+   * @returns {Promise<void>}
+   */
+  async init() {
+    try {
+      if (this.#isInitialized) {
+        Logger.warn('App', 'Déjà initialisé');
         return;
       }
-      detector = new YinDetector(audioCtx.sampleRate, DETECT_SIZE);
-      detector.threshold = 0.06;
-      smoother = new PitchSmoother({ medianWindowSize:5, smoothingFactor:0.76, maxPitchJump:250 });
 
-      // DSP: HPF + NoiseGate (si présents)
-      if (typeof BiquadHPF !== "undefined") {
-        hpf = new BiquadHPF(audioCtx.sampleRate, 80, Math.SQRT1_2);
-      }
-      if (typeof NoiseGate !== "undefined") {
-        gate = new NoiseGate(audioCtx.sampleRate, { thresholdDb: -50, reductionDb: -80, attackMs: 5, releaseMs: 50, holdMs: 30 });
-      }
+      Logger.info('App', 'Étape 1/6: Configuration Logger');
+      this.#configureLogger();
 
-      // buffers
-      bufRaw  = new Float32Array(DETECT_SIZE);
-      bufHPF  = new Float32Array(DETECT_SIZE);
-      bufGate = new Float32Array(DETECT_SIZE);
+      Logger.info('App', 'Étape 2/6: Chargement dépendances externes');
+      await this.#loadExternalDependencies();
 
-      badge.textContent = "Détecteur: OK";
-      badge.className = "badge ok";
-      btnRecStart.disabled = false;
+      Logger.info('App', 'Étape 3/6: Création services core');
+      await this.#createCoreServices();
 
-      startMonitor();
-      log("INFO","Micro OK, analyseur prêt ("+DETECT_SIZE+")");
-      if (hpf || gate) log("INFO", `DSP actif: ${hpf?'HPF80 ':''}${gate?'NoiseGate(-50dB)':''}`.trim());
-    }catch(e){
-      log("ERROR","activateMic: "+e.message);
-      badge.textContent = "Détecteur: ERREUR";
-      badge.className = "badge err";
+      Logger.info('App', 'Étape 4/6: Création services audio');
+      await this.#createAudioServices();
+
+      Logger.info('App', 'Étape 5/6: Création panneaux UI');
+      await this.#createPanels();
+
+      Logger.info('App', 'Étape 6/6: Connexion événements');
+      this.#connectEvents();
+
+      this.#isInitialized = true;
+
+      Logger.info('App', '✅ Application initialisée avec succès');
+      this.#eventBus.emit('app:initialized', {
+        timestamp: Date.now()
+      });
+
+    } catch (err) {
+      Logger.error('App', 'Erreur initialisation', err);
+      this.#handleInitError(err);
+      throw err;
     }
   }
 
-  function startMonitor(){
-    if (!detector || !analyser) return;
-    if (rafId) cancelAnimationFrame(rafId);
-    const t0 = audioCtx.currentTime;
+  /**
+   * Configurer le Logger
+   * @private
+   */
+  #configureLogger() {
+    try {
+      // Définir le niveau de log (DEBUG en dev, INFO en prod)
+      const isDev = window.location.hostname === 'localhost' || 
+                    window.location.hostname === '127.0.0.1';
+      
+      Logger.setLevel(isDev ? 'DEBUG' : 'INFO');
+      
+      Logger.info('App', `Mode: ${isDev ? 'Development' : 'Production'}`);
 
-    const loop = ()=>{
-      analyser.getFloatTimeDomainData(bufRaw);
+    } catch (err) {
+      console.error('[App] Erreur configureLogger:', err);
+    }
+  }
 
-      let sig = bufRaw;
-      if (hpf) { hpf.process(sig, bufHPF); sig = bufHPF; }
-      if (gate){ gate.process(sig, bufGate); sig = bufGate; }
+  /**
+   * Charger les dépendances externes
+   * @private
+   */
+  async #loadExternalDependencies() {
+    try {
+      // YIN Detector
+      if (!window.YinDetector) {
+        Logger.warn('App', 'YinDetector non chargé');
+        throw new Error('YinDetector requis (vendor/yin-detector.js)');
+      }
+      this.#yinDetector = new window.YinDetector();
+      Logger.info('App', 'YinDetector chargé');
 
-      const hz = detector.detect(sig);
-      if (hz && hz >= MIN_HZ && hz <= MAX_HZ) {
-        const sm = smoother ? smoother.smooth(hz) : hz;
-        if (sm) {
-          const t = audioCtx.currentTime - t0;
-          points.push({t, hz: sm});
-          // fenêtre glissante
-          const cut = t - (VISIBLE+0.5);
-          while(points.length && points[0].t < cut) points.shift();
+      // Pitch Smoother
+      if (!window.PitchSmoother) {
+        Logger.warn('App', 'PitchSmoother non chargé');
+        throw new Error('PitchSmoother requis (utils/pitch-smoothing.js)');
+      }
+      this.#pitchSmoother = new window.PitchSmoother();
+      Logger.info('App', 'PitchSmoother chargé');
+
+    } catch (err) {
+      Logger.error('App', 'Erreur loadExternalDependencies', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Créer les services core
+   * @private
+   */
+  async #createCoreServices() {
+    try {
+      // EventBus
+      this.#eventBus = new EventBus();
+      Logger.info('App', 'EventBus créé');
+
+      // AudioEngine (singleton)
+      this.#audioEngine = AudioEngine.getInstance();
+      Logger.info('App', 'AudioEngine récupéré');
+
+      // Note: L'AudioContext sera initialisé au premier clic utilisateur
+
+    } catch (err) {
+      Logger.error('App', 'Erreur createCoreServices', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Créer les services audio
+   * @private
+   */
+  async #createAudioServices() {
+    try {
+      // CentsCalculator
+      this.#centsCalculator = new CentsCalculator(440); // A4 = 440Hz
+      Logger.info('App', 'CentsCalculator créé');
+
+      // PitchAnalysisService
+      this.#pitchAnalysisService = new PitchAnalysisService(
+        this.#yinDetector,
+        this.#pitchSmoother,
+        this.#centsCalculator
+      );
+      this.#pitchAnalysisService.setMode('A440'); // Mode par défaut
+      Logger.info('App', 'PitchAnalysisService créé');
+
+      // MicrophoneManager (sera initialisé au start)
+      this.#microphoneManager = new MicrophoneManager(
+        this.#audioEngine,
+        this.#eventBus
+      );
+      Logger.info('App', 'MicrophoneManager créé');
+
+      // RecordingService
+      this.#recordingService = new RecordingService(
+        this.#audioEngine,
+        this.#eventBus,
+        this.#microphoneManager
+      );
+      Logger.info('App', 'RecordingService créé');
+
+    } catch (err) {
+      Logger.error('App', 'Erreur createAudioServices', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Créer les panneaux UI
+   * @private
+   */
+  async #createPanels() {
+    try {
+      // Panneau enregistrement
+      this.#panels.recording = new PitchAnalysisPanel({
+        type: 'recording',
+        containerId: 'panel-recording',
+        canvasId: 'canvas-recording',
+        pitchService: this.#pitchAnalysisService,
+        eventBus: this.#eventBus
+      });
+      Logger.info('App', 'Panneau Recording créé');
+
+      // Panneau référence (optionnel)
+      const refContainer = document.getElementById('panel-reference');
+      if (refContainer) {
+        this.#panels.reference = new PitchAnalysisPanel({
+          type: 'reference',
+          containerId: 'panel-reference',
+          canvasId: 'canvas-reference',
+          pitchService: this.#pitchAnalysisService,
+          eventBus: this.#eventBus
+        });
+        Logger.info('App', 'Panneau Reference créé');
+      }
+
+    } catch (err) {
+      Logger.error('App', 'Erreur createPanels', err);
+      // Les panneaux ne sont pas critiques, continuer
+      Logger.warn('App', 'Certains panneaux UI non créés, application continue');
+    }
+  }
+
+  /**
+   * Connecter les événements globaux
+   * @private
+   */
+  #connectEvents() {
+    try {
+      // Événements microphone
+      this.#eventBus.on('microphone:started', (data) => {
+        Logger.info('App', 'Microphone démarré');
+        this.#showNotification('success', MESSAGES.SUCCESS.MIC_STARTED);
+      });
+
+      this.#eventBus.on('microphone:error', (data) => {
+        Logger.error('App', 'Erreur microphone', data.error);
+        this.#showNotification('error', MESSAGES.ERROR.MIC_ACCESS_DENIED);
+      });
+
+      // Événements enregistrement
+      this.#eventBus.on('recording:started', () => {
+        Logger.info('App', 'Enregistrement démarré');
+        this.#showNotification('success', MESSAGES.SUCCESS.RECORDING_STARTED);
+      });
+
+      this.#eventBus.on('recording:stopped', (data) => {
+        Logger.info('App', 'Enregistrement arrêté', data);
+        this.#showNotification('success', MESSAGES.SUCCESS.RECORDING_STOPPED);
+      });
+
+      this.#eventBus.on('recording:error', (data) => {
+        Logger.error('App', 'Erreur enregistrement', data.error);
+        this.#showNotification('error', MESSAGES.ERROR.RECORDING_FAILED);
+      });
+
+      // Événements panneaux
+      this.#eventBus.on('panel:recording:started', () => {
+        Logger.info('App', 'Panneau recording activé');
+      });
+
+      // Logger tous les événements en mode debug
+      if (Logger.getLevel() === 'DEBUG') {
+        this.#eventBus.on('*', (eventName, data) => {
+          Logger.debug('App', `Événement: ${eventName}`, data);
+        });
+      }
+
+      Logger.info('App', 'Événements connectés');
+
+    } catch (err) {
+      Logger.error('App', 'Erreur connectEvents', err);
+    }
+  }
+
+  /**
+   * Démarrer l'application (nécessite un geste utilisateur)
+   * @returns {Promise<void>}
+   */
+  async start() {
+    try {
+      if (this.#isStarted) {
+        Logger.warn('App', 'Déjà démarré');
+        return;
+      }
+
+      Logger.info('App', 'Démarrage de l\'application...');
+
+      // Initialiser l'AudioContext (nécessite geste utilisateur)
+      await this.#audioEngine.init();
+      Logger.info('App', 'AudioContext initialisé');
+
+      // Démarrer le microphone
+      await this.#microphoneManager.start();
+      Logger.info('App', 'Microphone démarré');
+
+      this.#isStarted = true;
+
+      Logger.info('App', '✅ Application démarrée');
+      this.#eventBus.emit('app:started', {
+        timestamp: Date.now()
+      });
+
+    } catch (err) {
+      Logger.error('App', 'Erreur start', err);
+      this.#handleStartError(err);
+      throw err;
+    }
+  }
+
+  /**
+   * Arrêter l'application
+   */
+  stop() {
+    try {
+      Logger.info('App', 'Arrêt de l\'application...');
+
+      // Arrêter les services
+      if (this.#microphoneManager) {
+        this.#microphoneManager.stop();
+      }
+
+      if (this.#recordingService && this.#recordingService.isRecording()) {
+        this.#recordingService.stop();
+      }
+
+      // Arrêter les panneaux
+      Object.values(this.#panels).forEach(panel => {
+        if (panel && panel.isActive()) {
+          panel.stop();
         }
-      }
-      draw(audioCtx.currentTime - t0);
-      rafId = requestAnimationFrame(loop);
-    };
-    loop();
-  }
+      });
 
-  // ------- Record (simple) -------
-  function startRec(){
-    if (!micStream) return log("WARN","Active d'abord le micro");
-    try{
-      chunks.length = 0;
-      mediaRecorder = new MediaRecorder(micStream, {mimeType:"audio/webm;codecs=opus"});
-      mediaRecorder.ondataavailable = e=>{ if (e.data && e.data.size>0) chunks.push(e.data); };
-      mediaRecorder.start(100);
-      btnRecStart.disabled = true; btnRecStop.disabled = false;
-      log("INFO","Enregistrement démarré");
-    }catch(e){ log("ERROR","startRec: "+e.message); }
-  }
-  function stopRec(){
-    try{
-      if (mediaRecorder && mediaRecorder.state === "recording") {
-        mediaRecorder.stop();
-        btnRecStart.disabled = false; btnRecStop.disabled = true;
-        log("INFO","Enregistrement terminé ("+chunks.length+" segments)");
-      }
-    }catch(e){ log("ERROR","stopRec: "+e.message); }
-  }
+      this.#isStarted = false;
 
-  // ------- UI events -------
-  btnMic.addEventListener("click", activateMic);
-  btnRecStart.addEventListener("click", startRec);
-  btnRecStop.addEventListener("click", stopRec);
+      Logger.info('App', 'Application arrêtée');
+      this.#eventBus.emit('app:stopped', {
+        timestamp: Date.now()
+      });
 
-  btnScaleAbs.addEventListener("click", ()=>{ scaleMode="abs"; btnScaleAbs.classList.add("active"); btnMode440.classList.remove("active"); btnModeAuto.classList.remove("active"); });
-  btnMode440.addEventListener("click", ()=>{ scaleMode="a440"; btnMode440.classList.add("active"); btnScaleAbs.classList.remove("active"); btnModeAuto.classList.remove("active"); });
-  btnModeAuto.addEventListener("click",  ()=>{ scaleMode="auto"; btnModeAuto.classList.add("active"); btnScaleAbs.classList.remove("active"); btnMode440.classList.remove("active"); });
-
-  // Sanity check au chargement
-  window.addEventListener("load", ()=>{
-    if (typeof YinDetector === "undefined") {
-      badge.textContent = "Détecteur: ERREUR (yin-detector.js non chargé)";
-      badge.className = "badge err";
-      log("ERROR","YinDetector non défini → chemin de script invalide");
-    } else {
-      log("INFO","Interface prête — Live 30s, fenêtre 2048");
+    } catch (err) {
+      Logger.error('App', 'Erreur stop', err);
     }
-  });
-})();
+  }
+
+  /**
+   * Afficher une notification
+   * @private
+   */
+  #showNotification(type, message) {
+    try {
+      // TODO: Implémenter système de notifications UI
+      console.log(`[${type.toUpperCase()}] ${message}`);
+      
+      // Fallback: Alert pour les erreurs critiques
+      if (type === 'error') {
+        // Ne pas alerter en production, juste logger
+        Logger.error('App', message);
+      }
+
+    } catch (err) {
+      Logger.error('App', 'Erreur showNotification', err);
+    }
+  }
+
+  /**
+   * Gérer les erreurs d'initialisation
+   * @private
+   */
+  #handleInitError(err) {
+    try {
+      const errorMessage = err.message || 'Erreur inconnue';
+      
+      // Messages d'erreur spécifiques
+      if (errorMessage.includes('YinDetector')) {
+        this.#showNotification('error', 
+          'Erreur: YinDetector non chargé. Vérifiez que vendor/yin-detector.js est inclus.');
+      } else if (errorMessage.includes('PitchSmoother')) {
+        this.#showNotification('error',
+          'Erreur: PitchSmoother non chargé. Vérifiez que utils/pitch-smoothing.js est inclus.');
+      } else {
+        this.#showNotification('error',
+          `Erreur d'initialisation: ${errorMessage}`);
+      }
+
+    } catch (err2) {
+      console.error('[App] Erreur handleInitError:', err2);
+    }
+  }
+
+  /**
+   * Gérer les erreurs de démarrage
+   * @private
+   */
+  #handleStartError(err) {
+    try {
+      const errorMessage = err.message || 'Erreur inconnue';
+
+      if (errorMessage.includes('microphone') || errorMessage.includes('getUserMedia')) {
+        this.#showNotification('error', MESSAGES.ERROR.MIC_ACCESS_DENIED);
+      } else if (errorMessage.includes('AudioContext')) {
+        this.#showNotification('error', MESSAGES.ERROR.AUDIO_CONTEXT_FAILED);
+      } else {
+        this.#showNotification('error', `Erreur de démarrage: ${errorMessage}`);
+      }
+
+    } catch (err2) {
+      console.error('[App] Erreur handleStartError:', err2);
+    }
+  }
+
+  /**
+   * Obtenir un service
+   * @param {string} serviceName - Nom du service
+   * @returns {Object|null}
+   */
+  getService(serviceName) {
+    const services = {
+      eventBus: this.#eventBus,
+      audioEngine: this.#audioEngine,
+      microphone: this.#microphoneManager,
+      pitchAnalysis: this.#pitchAnalysisService,
+      recording: this.#recordingService,
+      centsCalculator: this.#centsCalculator
+    };
+
+    return services[serviceName] || null;
+  }
+
+  /**
+   * Obtenir un panneau
+   * @param {string} panelName - Nom du panneau
+   * @returns {Object|null}
+   */
+  getPanel(panelName) {
+    return this.#panels[panelName] || null;
+  }
+
+  /**
+   * Vérifier si l'application est initialisée
+   * @returns {boolean}
+   */
+  isInitialized() {
+    return this.#isInitialized;
+  }
+
+  /**
+   * Vérifier si l'application est démarrée
+   * @returns {boolean}
+   */
+  isStarted() {
+    return this.#isStarted;
+  }
+}
+
+// Export de l'instance unique
+const app = new App();
+
+// Export pour utilisation dans le HTML
+window.App = app;
+
+// Auto-initialisation
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    Logger.info('App', 'DOM chargé, initialisation...');
+    await app.init();
+    Logger.info('App', 'Prêt! Cliquez sur "Démarrer" pour lancer.');
+  } catch (err) {
+    Logger.error('App', 'Échec initialisation au chargement DOM', err);
+  }
+});
+
+// Export par défaut
+export default app;

@@ -1,5 +1,5 @@
 // src/audio/core/MicrophoneManager.js
-// Utilise le même AudioContext que l’AudioEngine (singleton) et gère tous les cas.
+// Partage le même AudioContext (AudioEngine), gère le micro et expose isActive()/getStream().
 
 import { Logger } from '../../logging/Logger.js';
 import { AudioEngine } from './AudioEngine.js';
@@ -8,21 +8,25 @@ class MicrophoneManager {
   constructor(options = {}) {
     this.stream = null;
     this.source = null;
-    this.constraints = options.constraints || { audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } };
+    this.constraints = options.constraints || {
+      audio: {
+        channelCount: 1,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+        // Ne PAS forcer sampleRate ici (on aligne côté AudioEngine si besoin)
+      }
+    };
   }
 
   async #ensureContext() {
     const engine = AudioEngine.getInstance();
-
-    // Essaie d’obtenir le contexte via propriété OU getter (selon ton AudioEngine)
     let ctx = engine.context || (typeof engine.getContext === 'function' ? engine.getContext() : null);
-
     if (!ctx || ctx.state === 'closed') {
-      Logger.warn('[MicrophoneManager] AudioContext absent → init()');
+      Logger.warn('[MicrophoneManager] AudioContext manquant → init()');
       await engine.init(); // peut logguer "Déjà initialisé"
       ctx = engine.context || (typeof engine.getContext === 'function' ? engine.getContext() : null);
     }
-    if (!ctx) throw new Error('AudioContext non disponible');
     return ctx;
   }
 
@@ -30,23 +34,19 @@ class MicrophoneManager {
     try {
       const ctx = await this.#ensureContext();
 
-      // Aligne le sampleRate d’acquisition sur celui du contexte (évite le mismatch FF/Chrome)
-      const alignedConstraints = structuredClone(this.constraints);
-      alignedConstraints.audio = alignedConstraints.audio || {};
-      alignedConstraints.audio.sampleRate = ctx.sampleRate;
-
-      Logger.info('[MicrophoneManager] Demande accès microphone...', alignedConstraints);
-      const stream = await navigator.mediaDevices.getUserMedia(alignedConstraints);
+      Logger.info('[MicrophoneManager] Demande accès microphone...', this.constraints);
+      const stream = await navigator.mediaDevices.getUserMedia(this.constraints);
       Logger.info('[MicrophoneManager] Accès microphone accordé');
 
       this.stream = stream;
 
-      // Création de la source dans LE MÊME contexte
+      // Créer la source dans le même AudioContext
       this.source = ctx.createMediaStreamSource(stream);
 
+      const trackRate = stream.getAudioTracks()?.[0]?.getSettings?.()?.sampleRate || 'n/a';
       Logger.info('[MicrophoneManager] Source créée', {
         contextSampleRate: ctx.sampleRate,
-        trackRate: stream.getAudioTracks()?.[0]?.getSettings?.()?.sampleRate || 'n/a'
+        trackSampleRateHint: trackRate
       });
 
       return { stream: this.stream, source: this.source };
@@ -54,6 +54,14 @@ class MicrophoneManager {
       Logger.error('[MicrophoneManager] Erreur start', err);
       throw err;
     }
+  }
+
+  isActive() {
+    return !!this.stream && this.stream.getAudioTracks().some(t => t.readyState === 'live');
+  }
+
+  getStream() {
+    return this.stream || null;
   }
 
   connect(node) {

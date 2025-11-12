@@ -101,33 +101,50 @@ export class PitchAnalysisPanel {
 
   /**
    * Configurer le pipeline audio : Micro → ScriptProcessor → Pitch Detection
+   * CORRECTION : Créer TOUJOURS le scriptProcessor, même si micSource absent
    */
   _setupAudioPipeline(context) {
-    const micSource = audioEngine.micSource;
-    
-    if (!micSource) {
-      Logger.warn('[PitchAnalysisPanel] Pas de source micro disponible');
-      return;
-    }
-
     // Créer ScriptProcessor pour analyser l'audio
     // Buffer size : 2048 samples = bon compromis latence/précision
     const bufferSize = 2048;
-    this.scriptProcessor = context.createScriptProcessor(bufferSize, 1, 1);
+    
+    try {
+      this.scriptProcessor = context.createScriptProcessor(bufferSize, 1, 1);
+      Logger.info('[PitchAnalysisPanel] ScriptProcessor créé', { bufferSize });
+    } catch (e) {
+      Logger.error('[PitchAnalysisPanel] Erreur création ScriptProcessor', e);
+      throw e;
+    }
     
     // Callback appelé pour chaque buffer audio
     this.scriptProcessor.onaudioprocess = (e) => {
       this._processAudioBuffer(e);
     };
+    
+    Logger.info('[PitchAnalysisPanel] Callback onaudioprocess défini');
 
-    // Connecter : Micro → ScriptProcessor → Destination
-    try {
-      micSource.connect(this.scriptProcessor);
-      this.scriptProcessor.connect(context.destination);
-      Logger.info('[PitchAnalysisPanel] Pipeline audio connecté', { bufferSize });
-    } catch (e) {
-      Logger.error('[PitchAnalysisPanel] Erreur connexion pipeline', e);
-      throw e;
+    // Connecter seulement si micSource existe
+    const micSource = audioEngine.micSource;
+    
+    if (micSource) {
+      try {
+        micSource.connect(this.scriptProcessor);
+        this.scriptProcessor.connect(context.destination);
+        Logger.info('[PitchAnalysisPanel] Pipeline audio connecté (Micro → ScriptProcessor → Destination)');
+      } catch (e) {
+        Logger.error('[PitchAnalysisPanel] Erreur connexion pipeline', e);
+        throw e;
+      }
+    } else {
+      // MicSource pas encore disponible - connecter quand même à destination
+      // pour que le scriptProcessor soit actif
+      Logger.warn('[PitchAnalysisPanel] MicSource absent, connexion à destination uniquement');
+      try {
+        this.scriptProcessor.connect(context.destination);
+        Logger.info('[PitchAnalysisPanel] ScriptProcessor connecté à destination');
+      } catch (e) {
+        Logger.error('[PitchAnalysisPanel] Erreur connexion destination', e);
+      }
     }
   }
 
@@ -165,6 +182,12 @@ export class PitchAnalysisPanel {
         
         // Émettre événement pour mettre à jour l'UI (métriques)
         this._updateMetrics();
+        
+        Logger.debug('[PitchAnalysisPanel] Pitch détecté', {
+          frequency: this.lastMetrics.frequency,
+          note: this.lastMetrics.note,
+          cents: this.lastMetrics.cents
+        });
       }
 
     } catch (e) {

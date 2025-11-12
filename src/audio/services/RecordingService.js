@@ -10,13 +10,40 @@ export class RecordingService {
   #collectR = [];
   #recording = false;
   #last = { live:null, ref:null };
+  #startTime = 0;
 
-  isRecording(){ return this.#recording; }
-  hasRecording(){ return !!this.#last.live; }
+  isRecording() { 
+    return this.#recording; 
+  }
 
-  startFromSource(sourceNode){
-    if(this.#recording) return true;
-    const { context } = audioEngine.ready();
+  hasRecording() { 
+    return !!this.#last.live; 
+  }
+
+  startFromSource(sourceNode) {
+    if (this.#recording) {
+      Logger.warn('[RecordingService] Déjà en cours d\'enregistrement');
+      return true;
+    }
+
+    if (!sourceNode) {
+      const err = new Error('Source node manquant');
+      Logger.error('[RecordingService]', err);
+      throw err;
+    }
+
+    // CORRECTION : Utiliser audioEngine.context au lieu de audioEngine.ready()
+    const context = audioEngine.context;
+    if (!context) {
+      const err = new Error('AudioEngine non initialisé - appelez audioEngine.init() d\'abord');
+      Logger.error('[RecordingService]', err);
+      throw err;
+    }
+
+    Logger.info('[RecordingService] Démarrage enregistrement...', {
+      sampleRate: context.sampleRate,
+      contextState: context.state
+    });
 
     this.#gain = context.createGain();
     sourceNode.connect(this.#gain);
@@ -26,103 +53,174 @@ export class RecordingService {
     this.#processor = sp;
     this.#collectL = [];
     this.#collectR = [];
+    this.#startTime = Date.now();
 
-    sp.onaudioprocess = (e)=>{
+    sp.onaudioprocess = (e) => {
       const L = e.inputBuffer.getChannelData(0);
-      const R = e.inputBuffer.numberOfChannels>1 ? e.inputBuffer.getChannelData(1) : L;
+      const R = e.inputBuffer.numberOfChannels > 1 ? e.inputBuffer.getChannelData(1) : L;
       this.#collectL.push(new Float32Array(L));
       this.#collectR.push(new Float32Array(R));
     };
 
     this.#gain.connect(sp);
-    sp.connect(context.destination); // nécessaire pour certains browsers
+    sp.connect(context.destination); // Nécessaire pour certains browsers
     this.#recording = true;
-    Logger.info('[RecordingService] Enregistrement démarré');
+    
+    Logger.info('[RecordingService] ✅ Enregistrement démarré', {
+      bufferSize: bs,
+      channels: 2
+    });
     return true;
   }
 
-  async stopAndEncode(kind='live'){
-    if(!this.#recording) return null;
-    const { context } = audioEngine.ready();
+  async stopAndEncode(kind='live') {
+    if (!this.#recording) {
+      Logger.warn('[RecordingService] Pas d\'enregistrement en cours');
+      return null;
+    }
 
-    // teardown graph
-    try{
-      this.#processor.disconnect(); this.#gain.disconnect();
-    }catch(_){}
-    this.#processor = null; this.#gain = null;
+    const duration = Date.now() - this.#startTime;
+    Logger.info('[RecordingService] Arrêt enregistrement...', { 
+      duration: `${(duration/1000).toFixed(2)}s`,
+      chunksL: this.#collectL.length,
+      chunksR: this.#collectR.length
+    });
+
+    // CORRECTION : Utiliser audioEngine.context au lieu de audioEngine.ready()
+    const context = audioEngine.context;
+    if (!context) {
+      const err = new Error('AudioEngine non initialisé');
+      Logger.error('[RecordingService]', err);
+      throw err;
+    }
+
+    // Teardown graph
+    try {
+      this.#processor.disconnect(); 
+      this.#gain.disconnect();
+      Logger.info('[RecordingService] Audio graph déconnecté');
+    } catch (e) {
+      Logger.error('[RecordingService] Erreur déconnexion audio graph', e);
+    }
+    
+    this.#processor = null; 
+    this.#gain = null;
     this.#recording = false;
 
-    // merge
-    const merge = (chunks)=>{
-      const len = chunks.reduce((a,b)=>a+b.length,0);
+    // Merge chunks
+    const merge = (chunks) => {
+      const len = chunks.reduce((a, b) => a + b.length, 0);
       const out = new Float32Array(len);
-      let off=0; for(const c of chunks){ out.set(c, off); off+=c.length; }
+      let off = 0; 
+      for (const c of chunks) { 
+        out.set(c, off); 
+        off += c.length; 
+      }
       return out;
     };
+
     const l = merge(this.#collectL);
     const r = merge(this.#collectR);
-    this.#collectL = []; this.#collectR = [];
+    this.#collectL = []; 
+    this.#collectR = [];
 
-    // encode MP3 with lamejs
+    Logger.info('[RecordingService] Samples fusionnés', {
+      totalSamples: l.length,
+      durationCalc: `${(l.length / context.sampleRate).toFixed(2)}s`
+    });
+
+    // Encode MP3 with lamejs
     const sr = context.sampleRate;
     const ch = 2;
-    // downmix if mono
     const interleaved = interleave(l, r);
+    
+    Logger.info('[RecordingService] Encodage MP3...', {
+      sampleRate: sr,
+      channels: ch,
+      kbps: 192
+    });
+
     const mp3 = encodeMp3(interleaved, sr, ch, 192);
 
     const blob = new Blob([new Uint8Array(mp3)], {type:'audio/mpeg'});
     const name = `${kind==='ref'?'reference':'prise-live'}_${ts()}.mp3`;
-    const file = { blob, name, duration: (interleaved.length/sr).toFixed(2) };
+    const file = { 
+      blob, 
+      name, 
+      duration: (interleaved.length / sr * 1000).toFixed(0),  // en ms
+      mp3Blob: blob  // Ajout pour compatibilité avec app.html ligne 118
+    };
+    
     this.#last[kind] = file;
-    Logger.info('[RecordingService] Enregistrement arrêté ', { duration:file.duration, size:(blob.size/1024).toFixed(1)+'KB' });
+    
+    Logger.info('[RecordingService] ✅ Enregistrement terminé', { 
+      filename: name,
+      duration: `${(file.duration/1000).toFixed(2)}s`, 
+      size: `${(blob.size/1024).toFixed(1)} KB`
+    });
+    
     return file;
 
-    function interleave(L,R){
+    function interleave(L, R) {
       const len = Math.min(L.length, R.length);
-      const out = new Float32Array(len*2);
-      let i=0,j=0;
-      while(i<len){
+      const out = new Float32Array(len * 2);
+      let i = 0, j = 0;
+      while (i < len) {
         out[j++] = L[i];
         out[j++] = R[i];
         i++;
       }
       return out;
     }
-    function encodeMp3(float32, sampleRate, channels, kbps){
+
+    function encodeMp3(float32, sampleRate, channels, kbps) {
       const samples = floatTo16BitPCM(float32);
       const mp3enc = new lamejs.Mp3Encoder(channels, sampleRate, kbps);
       const mp3 = [];
-      const block = 1152*channels;
-      for(let i=0;i<samples.length;i+=block){
-        const left = samples.subarray(i, i+block).filter((_,idx)=>idx%2===0);
-        const right= samples.subarray(i, i+block).filter((_,idx)=>idx%2===1);
+      const block = 1152 * channels;
+      
+      for (let i = 0; i < samples.length; i += block) {
+        const left = samples.subarray(i, i + block).filter((_, idx) => idx % 2 === 0);
+        const right = samples.subarray(i, i + block).filter((_, idx) => idx % 2 === 1);
         const chunk = mp3enc.encodeBuffer(left, right);
-        if(chunk.length) mp3.push(chunk);
+        if (chunk.length) mp3.push(chunk);
       }
+      
       const end = mp3enc.flush();
-      if(end.length) mp3.push(end);
+      if (end.length) mp3.push(end);
+      
       return new Uint8Array(concat(mp3));
     }
-    function floatTo16BitPCM(input){
+
+    function floatTo16BitPCM(input) {
       const out = new Int16Array(input.length);
-      for(let i=0;i<input.length;i++){
+      for (let i = 0; i < input.length; i++) {
         let s = Math.max(-1, Math.min(1, input[i]));
-        out[i] = s<0 ? s*0x8000 : s*0x7FFF;
+        out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
       }
       return out;
     }
-    function concat(chunks){
-      let len=0; chunks.forEach(c=>len+=c.length);
+
+    function concat(chunks) {
+      let len = 0; 
+      chunks.forEach(c => len += c.length);
       const out = new Uint8Array(len);
-      let o=0; for(const c of chunks){ out.set(c,o); o+=c.length; }
+      let o = 0; 
+      for (const c of chunks) { 
+        out.set(c, o); 
+        o += c.length; 
+      }
       return out;
     }
-    function ts(){
-      const d=new Date();
-      const p=n=>String(n).padStart(2,'0');
+
+    function ts() {
+      const d = new Date();
+      const p = n => String(n).padStart(2, '0');
       return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
     }
   }
 
-  getLast(kind='live'){ return this.#last[kind]; }
+  getLast(kind='live') { 
+    return this.#last[kind]; 
+  }
 }

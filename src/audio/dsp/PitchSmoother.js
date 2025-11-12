@@ -1,383 +1,211 @@
+// src/audio/dsp/PitchSmoother.js
+// Lissage multi-étage des données de pitch
+// Médiane → EMA → Validation sauts
+
+import { Logger } from '../../logging/Logger.js';
+
 /**
- * PitchSmoother.js - Lissage Multi-Stage des Pitches
- * 
- * Lissage robuste des fréquences détectées
- * Combine filtre médian + EMA + détection de sauts
- * 
- * Fichier 9/18 - ANALYSE & LISSAGE
- * Dépend de: Logger.js, constants.js, AudioMath.js
+ * Classe pour lisser les données de pitch détectées
+ * Utilise 3 étages :
+ * 1. Filtre médian (supprime outliers)
+ * 2. EMA - Exponential Moving Average (lissage)
+ * 3. Validation des sauts (évite changements brutaux)
  */
+export class PitchSmoother {
+  #medianWindow = [];
+  #medianSize = 5;
+  #emaValue = null;
+  #emaAlpha = 0.3;
+  #maxJumpCents = 100;
+  #lastValidFreq = null;
+  #consecutiveInvalid = 0;
+  #maxConsecutiveInvalid = 3;
 
-import Logger from '../../logging/Logger.js';
-import { SMOOTHING, PITCH_DETECTION } from '../../config/constants.js';
-import { isValidHz, clampHz, median } from '../../utils/AudioMath.js';
+  constructor(options = {}) {
+    this.#medianSize = options.medianSize || 5;
+    this.#emaAlpha = options.emaAlpha || 0.3;
+    this.#maxJumpCents = options.maxJumpCents || 100;
+    this.#maxConsecutiveInvalid = options.maxConsecutiveInvalid || 3;
 
-class PitchSmoother {
-  constructor() {
-    this.smoothingFactor = SMOOTHING.FACTOR;
-    this.medianWindowSize = SMOOTHING.MEDIAN_WINDOW_SIZE;
-    this.jumpThreshold = SMOOTHING.JUMP_THRESHOLD_CENTS;
-    this.stages = SMOOTHING.STAGES;
-    
-    // État interne
-    this.lastSmoothedValue = null;
-    this.medianWindow = [];
-    this.history = [];
-    this.maxHistorySize = 50;
-    
-    Logger.info('PitchSmoother', 'Smoother initialisé', {
-      factor: this.smoothingFactor,
-      medianWindow: this.medianWindowSize,
-      jumpThreshold: this.jumpThreshold
+    Logger.info('[PitchSmoother] Initialisé', {
+      medianSize: this.#medianSize,
+      emaAlpha: this.#emaAlpha,
+      maxJumpCents: this.#maxJumpCents
     });
   }
-  
+
   /**
-   * Lisse une valeur de pitch (multi-stage)
-   * @param {number} rawPitch - Pitch brut en Hz
-   * @returns {number|null} Pitch lissé en Hz
+   * Lisser une valeur de fréquence
+   * @param {number|null} frequency - Fréquence détectée en Hz (null si pas de détection)
+   * @returns {number|null} Fréquence lissée ou null
    */
-  smooth(rawPitch) {
-    // Valider l'entrée
-    if (!rawPitch || !isValidHz(rawPitch)) {
-      return this.lastSmoothedValue;
+  smooth(frequency) {
+    // Si pas de détection
+    if (frequency === null || frequency === undefined || frequency <= 0) {
+      this.#consecutiveInvalid++;
+      
+      // Si trop d'invalides consécutifs, reset
+      if (this.#consecutiveInvalid > this.#maxConsecutiveInvalid) {
+        this.reset();
+        Logger.debug('[PitchSmoother] Reset après trop d\'invalides');
+      }
+      
+      return null;
     }
+
+    this.#consecutiveInvalid = 0;
+
+    // Étape 1 : Filtre médian
+    const medianFiltered = this.#applyMedianFilter(frequency);
+
+    // Étape 2 : EMA (Exponential Moving Average)
+    const emaFiltered = this.#applyEMA(medianFiltered);
+
+    // Étape 3 : Validation des sauts
+    const jumpValidated = this.#validateJump(emaFiltered);
+
+    this.#lastValidFreq = jumpValidated;
+
+    return jumpValidated;
+  }
+
+  /**
+   * Filtre médian : Garde la valeur médiane d'une fenêtre glissante
+   * Supprime les outliers (valeurs aberrantes)
+   * @private
+   */
+  #applyMedianFilter(frequency) {
+    // Ajouter à la fenêtre
+    this.#medianWindow.push(frequency);
+
+    // Garder seulement les N dernières valeurs
+    if (this.#medianWindow.length > this.#medianSize) {
+      this.#medianWindow.shift();
+    }
+
+    // Si pas assez de valeurs, retourner la fréquence brute
+    if (this.#medianWindow.length < 3) {
+      return frequency;
+    }
+
+    // Calculer la médiane
+    const sorted = [...this.#medianWindow].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
     
-    try {
-      let smoothedValue = rawPitch;
-      
-      // Stage 1: Filtre médian (supprime les outliers)
-      if (SMOOTHING.MULTI_STAGE_ENABLED) {
-        smoothedValue = this.medianFilter(smoothedValue);
-      }
-      
-      // Stage 2: Détection et correction de sauts
-      if (this.lastSmoothedValue !== null) {
-        smoothedValue = this.detectAndCorrectJump(smoothedValue);
-      }
-      
-      // Stage 3: Lissage exponentiel (EMA)
-      if (this.lastSmoothedValue !== null) {
-        smoothedValue = this.exponentialSmoothing(smoothedValue);
-      }
-      
-      // Valider et clamper
-      smoothedValue = clampHz(smoothedValue);
-      
-      // Sauvegarder dans l'historique
-      this.history.push({
-        raw: rawPitch,
-        smoothed: smoothedValue,
-        timestamp: Date.now()
+    const median = sorted.length % 2 === 0
+      ? (sorted[mid - 1] + sorted[mid]) / 2
+      : sorted[mid];
+
+    return median;
+  }
+
+  /**
+   * EMA (Exponential Moving Average)
+   * Lisse les transitions
+   * @private
+   */
+  #applyEMA(frequency) {
+    if (this.#emaValue === null) {
+      // Première valeur
+      this.#emaValue = frequency;
+      return frequency;
+    }
+
+    // Formule EMA : new_value = alpha × current + (1-alpha) × previous
+    this.#emaValue = this.#emaAlpha * frequency + (1 - this.#emaAlpha) * this.#emaValue;
+
+    return this.#emaValue;
+  }
+
+  /**
+   * Validation des sauts
+   * Rejette les changements trop brutaux (>100 cents)
+   * @private
+   */
+  #validateJump(frequency) {
+    if (this.#lastValidFreq === null) {
+      // Première valeur valide
+      return frequency;
+    }
+
+    // Calculer le saut en cents
+    const cents = 1200 * Math.log2(frequency / this.#lastValidFreq);
+    const absCents = Math.abs(cents);
+
+    // Si saut trop grand, garder l'ancienne valeur
+    if (absCents > this.#maxJumpCents) {
+      Logger.debug('[PitchSmoother] Saut rejeté', {
+        from: Math.round(this.#lastValidFreq),
+        to: Math.round(frequency),
+        cents: Math.round(cents)
       });
-      
-      // Limiter la taille de l'historique
-      if (this.history.length > this.maxHistorySize) {
-        this.history.shift();
-      }
-      
-      // Mettre à jour la dernière valeur lissée
-      this.lastSmoothedValue = smoothedValue;
-      
-      return smoothedValue;
-      
-    } catch (error) {
-      Logger.error('PitchSmoother', 'Erreur lissage', error);
-      return rawPitch;
+      return this.#lastValidFreq;
     }
+
+    return frequency;
   }
-  
+
   /**
-   * Stage 1: Filtre médian
-   * @param {number} value - Valeur à filtrer
-   * @returns {number} Valeur filtrée
-   */
-  medianFilter(value) {
-    try {
-      // Ajouter à la fenêtre médiane
-      this.medianWindow.push(value);
-      
-      // Limiter la taille de la fenêtre
-      if (this.medianWindow.length > this.medianWindowSize) {
-        this.medianWindow.shift();
-      }
-      
-      // Si la fenêtre n'est pas encore remplie, retourner la valeur brute
-      if (this.medianWindow.length < this.medianWindowSize) {
-        return value;
-      }
-      
-      // Calculer la médiane
-      return median(this.medianWindow);
-      
-    } catch (error) {
-      Logger.warn('PitchSmoother', 'Erreur filtre médian', error);
-      return value;
-    }
-  }
-  
-  /**
-   * Stage 2: Détection et correction de sauts brusques
-   * @param {number} value - Valeur à vérifier
-   * @returns {number} Valeur corrigée
-   */
-  detectAndCorrectJump(value) {
-    if (this.lastSmoothedValue === null) {
-      return value;
-    }
-    
-    try {
-      // Calculer la différence en cents
-      const cents = 1200 * Math.log2(value / this.lastSmoothedValue);
-      const absCents = Math.abs(cents);
-      
-      // Si le saut dépasse le seuil, limiter la variation
-      if (absCents > this.jumpThreshold) {
-        Logger.debug('PitchSmoother', 'Saut détecté', {
-          from: this.lastSmoothedValue.toFixed(2),
-          to: value.toFixed(2),
-          cents: cents.toFixed(0)
-        });
-        
-        // Limiter le saut à la moitié du seuil
-        const maxCents = this.jumpThreshold / 2;
-        const limitedCents = Math.sign(cents) * maxCents;
-        
-        // Recalculer la valeur limitée
-        return this.lastSmoothedValue * Math.pow(2, limitedCents / 1200);
-      }
-      
-      return value;
-      
-    } catch (error) {
-      Logger.warn('PitchSmoother', 'Erreur détection saut', error);
-      return value;
-    }
-  }
-  
-  /**
-   * Stage 3: Lissage exponentiel (EMA)
-   * @param {number} value - Valeur actuelle
-   * @returns {number} Valeur lissée
-   */
-  exponentialSmoothing(value) {
-    if (this.lastSmoothedValue === null) {
-      return value;
-    }
-    
-    try {
-      // EMA: smoothed = (1 - α) * lastSmoothed + α * current
-      // où α = smoothingFactor
-      const alpha = this.smoothingFactor;
-      return (1 - alpha) * this.lastSmoothedValue + alpha * value;
-      
-    } catch (error) {
-      Logger.warn('PitchSmoother', 'Erreur EMA', error);
-      return value;
-    }
-  }
-  
-  /**
-   * Lisse un tableau de pitches
-   * @param {number[]} pitches - Tableau de pitches bruts
-   * @returns {number[]} Tableau de pitches lissés
-   */
-  smoothArray(pitches) {
-    if (!Array.isArray(pitches)) {
-      Logger.warn('PitchSmoother', 'Entrée invalide pour smoothArray');
-      return [];
-    }
-    
-    try {
-      // Réinitialiser l'état
-      this.reset();
-      
-      const smoothed = [];
-      
-      for (const pitch of pitches) {
-        const smoothedPitch = this.smooth(pitch);
-        if (smoothedPitch !== null) {
-          smoothed.push(smoothedPitch);
-        }
-      }
-      
-      return smoothed;
-      
-    } catch (error) {
-      Logger.error('PitchSmoother', 'Erreur smoothArray', error);
-      return pitches;
-    }
-  }
-  
-  /**
-   * Lisse un tableau de pitches sans modifier l'état interne
-   * @param {number[]} pitches - Tableau de pitches bruts
-   * @returns {number[]} Tableau de pitches lissés
-   */
-  smoothArrayStateless(pitches) {
-    if (!Array.isArray(pitches) || pitches.length === 0) {
-      return [];
-    }
-    
-    try {
-      // Créer un smoother temporaire
-      const tempSmoother = new PitchSmoother();
-      tempSmoother.smoothingFactor = this.smoothingFactor;
-      tempSmoother.medianWindowSize = this.medianWindowSize;
-      tempSmoother.jumpThreshold = this.jumpThreshold;
-      
-      return tempSmoother.smoothArray(pitches);
-      
-    } catch (error) {
-      Logger.error('PitchSmoother', 'Erreur smoothArrayStateless', error);
-      return pitches;
-    }
-  }
-  
-  /**
-   * Réinitialise l'état du smoother
+   * Réinitialiser le smoother (vider tous les buffers)
    */
   reset() {
-    this.lastSmoothedValue = null;
-    this.medianWindow = [];
-    this.history = [];
-    
-    Logger.info('PitchSmoother', 'État réinitialisé');
+    this.#medianWindow = [];
+    this.#emaValue = null;
+    this.#lastValidFreq = null;
+    this.#consecutiveInvalid = 0;
+    Logger.debug('[PitchSmoother] Reset');
   }
-  
+
   /**
-   * Définit le facteur de lissage
-   * @param {number} factor - Facteur (0-1)
+   * Obtenir l'état actuel du smoother
+   * @returns {Object}
    */
-  setSmoothingFactor(factor) {
-    if (factor >= 0 && factor <= 1) {
-      this.smoothingFactor = factor;
-      Logger.info('PitchSmoother', 'Facteur modifié', { factor });
-    } else {
-      Logger.warn('PitchSmoother', 'Facteur invalide', { factor });
-    }
-  }
-  
-  /**
-   * Définit la taille de la fenêtre médiane
-   * @param {number} size - Taille (impair recommandé)
-   */
-  setMedianWindowSize(size) {
-    if (size > 0 && size <= 21) {
-      this.medianWindowSize = size;
-      Logger.info('PitchSmoother', 'Fenêtre médiane modifiée', { size });
-    } else {
-      Logger.warn('PitchSmoother', 'Taille fenêtre invalide', { size });
-    }
-  }
-  
-  /**
-   * Définit le seuil de saut
-   * @param {number} threshold - Seuil en cents
-   */
-  setJumpThreshold(threshold) {
-    if (threshold > 0) {
-      this.jumpThreshold = threshold;
-      Logger.info('PitchSmoother', 'Seuil saut modifié', { threshold });
-    } else {
-      Logger.warn('PitchSmoother', 'Seuil invalide', { threshold });
-    }
-  }
-  
-  /**
-   * Récupère l'historique de lissage
-   * @param {number} count - Nombre d'entrées (optionnel)
-   * @returns {Array} Historique
-   */
-  getHistory(count = null) {
-    if (count === null) {
-      return [...this.history];
-    }
-    
-    const start = Math.max(0, this.history.length - count);
-    return this.history.slice(start);
-  }
-  
-  /**
-   * Calcule les statistiques de lissage
-   * @returns {object} Statistiques
-   */
-  getStatistics() {
-    if (this.history.length === 0) {
-      return {
-        count: 0,
-        avgDifference: 0,
-        maxDifference: 0,
-        minDifference: 0
-      };
-    }
-    
-    try {
-      const differences = this.history.map(entry => 
-        Math.abs(entry.smoothed - entry.raw)
-      );
-      
-      const avgDiff = differences.reduce((a, b) => a + b, 0) / differences.length;
-      const maxDiff = Math.max(...differences);
-      const minDiff = Math.min(...differences);
-      
-      return {
-        count: this.history.length,
-        avgDifference: avgDiff,
-        maxDifference: maxDiff,
-        minDifference: minDiff
-      };
-      
-    } catch (error) {
-      Logger.error('PitchSmoother', 'Erreur calcul stats', error);
-      return {
-        count: this.history.length,
-        avgDifference: 0,
-        maxDifference: 0,
-        minDifference: 0
-      };
-    }
-  }
-  
-  /**
-   * Exporte la configuration actuelle
-   * @returns {object} Configuration
-   */
-  getConfig() {
+  getState() {
     return {
-      smoothingFactor: this.smoothingFactor,
-      medianWindowSize: this.medianWindowSize,
-      jumpThreshold: this.jumpThreshold,
-      stages: this.stages,
-      multiStageEnabled: SMOOTHING.MULTI_STAGE_ENABLED
+      medianWindowSize: this.#medianWindow.length,
+      emaValue: this.#emaValue,
+      lastValidFreq: this.#lastValidFreq,
+      consecutiveInvalid: this.#consecutiveInvalid
     };
   }
-  
+
   /**
-   * Importe une configuration
-   * @param {object} config - Configuration à importer
+   * Mettre à jour les paramètres
+   * @param {Object} options
    */
-  setConfig(config) {
-    try {
-      if (config.smoothingFactor !== undefined) {
-        this.setSmoothingFactor(config.smoothingFactor);
-      }
-      
-      if (config.medianWindowSize !== undefined) {
-        this.setMedianWindowSize(config.medianWindowSize);
-      }
-      
-      if (config.jumpThreshold !== undefined) {
-        this.setJumpThreshold(config.jumpThreshold);
-      }
-      
-      Logger.success('PitchSmoother', 'Configuration importée');
-      
-    } catch (error) {
-      Logger.error('PitchSmoother', 'Erreur import config', error);
+  setOptions(options = {}) {
+    if (options.medianSize !== undefined) {
+      this.#medianSize = options.medianSize;
     }
+    if (options.emaAlpha !== undefined) {
+      this.#emaAlpha = options.emaAlpha;
+    }
+    if (options.maxJumpCents !== undefined) {
+      this.#maxJumpCents = options.maxJumpCents;
+    }
+    if (options.maxConsecutiveInvalid !== undefined) {
+      this.#maxConsecutiveInvalid = options.maxConsecutiveInvalid;
+    }
+
+    Logger.info('[PitchSmoother] Options mises à jour', {
+      medianSize: this.#medianSize,
+      emaAlpha: this.#emaAlpha,
+      maxJumpCents: this.#maxJumpCents
+    });
   }
 }
 
-// Exporter la classe
+/**
+ * Factory function avec config par défaut
+ * @returns {PitchSmoother}
+ */
+export function createPitchSmoother() {
+  return new PitchSmoother({
+    medianSize: 5,           // Fenêtre de 5 valeurs pour médiane
+    emaAlpha: 0.3,           // 30% nouvelle valeur, 70% ancienne (lissage modéré)
+    maxJumpCents: 100,       // Rejeter sauts >100 cents (>1 demi-ton)
+    maxConsecutiveInvalid: 3 // Reset après 3 détections invalides
+  });
+}
+
 export default PitchSmoother;

@@ -1,5 +1,6 @@
 // src/ui/components/PitchAnalysisPanel.js
 // Orchestre : Pitch Detection → Smoothing → Visualization → Metrics
+// VERSION ANALYSER (sans ScriptProcessor)
 import { Logger } from '../../logging/Logger.js';
 import { audioEngine } from '../../audio/core/AudioEngine.js';
 import { SinusoidalRenderer } from '../../visualization/renderers/SinusoidalRenderer.js';
@@ -11,12 +12,10 @@ export class PitchAnalysisPanel {
     this.renderer = null;
     this.pitchDetector = null;
     this.pitchSmoother = null;
-    this.scriptProcessor = null;
+    this.analyser = null; // AnalyserNode (remplace ScriptProcessor)
     this.active = false;
     this.canvas = null;
-    
-    // Buffer pour pitch detection
-    this.audioBuffer = null;
+    this.metricsLoopId = null; // ID de la boucle RAF pour métriques
     
     // Dernières métriques détectées
     this.lastMetrics = {
@@ -79,119 +78,107 @@ export class PitchAnalysisPanel {
     });
     Logger.info('[PitchAnalysisPanel] PitchSmoother créé');
 
-    // 3. Créer SinusoidalRenderer
+    // 3. Créer AnalyserNode
+    try {
+      this.analyser = context.createAnalyser();
+      this.analyser.fftSize = 2048; // Buffer de 2048 samples
+      this.analyser.smoothingTimeConstant = 0; // Pas de lissage (on le fait nous-mêmes)
+      Logger.info('[PitchAnalysisPanel] AnalyserNode créé', { 
+        fftSize: this.analyser.fftSize,
+        bufferSize: this.analyser.frequencyBinCount
+      });
+    } catch (e) {
+      Logger.error('[PitchAnalysisPanel] Erreur création AnalyserNode', e);
+      throw e;
+    }
+
+    // 4. Connecter AnalyserNode au microphone
+    const micSource = audioEngine.micSource;
+    if (micSource) {
+      try {
+        micSource.connect(this.analyser);
+        Logger.info('[PitchAnalysisPanel] AnalyserNode connecté au microphone');
+      } catch (e) {
+        Logger.error('[PitchAnalysisPanel] Erreur connexion AnalyserNode', e);
+        throw e;
+      }
+    } else {
+      Logger.warn('[PitchAnalysisPanel] Pas de source micro disponible');
+    }
+
+    // 5. Créer SinusoidalRenderer
     try {
       this.renderer = new SinusoidalRenderer(canvasEl, { persistent: true });
       this.renderer.attachPitchDetector(this.pitchDetector, this.pitchSmoother);
-      Logger.info('[PitchAnalysisPanel] SinusoidalRenderer créé');
+      this.renderer.attachAnalyser(this.analyser);
+      Logger.info('[PitchAnalysisPanel] SinusoidalRenderer créé et connecté');
     } catch (e) {
       Logger.error('[PitchAnalysisPanel] Erreur création renderer', e);
       throw e;
     }
 
-    // 4. Connecter au micro via ScriptProcessor
-    this._setupAudioPipeline(context);
-
-    // 5. Démarrer le renderer
+    // 6. Démarrer le renderer (boucle de visualisation)
     this.renderer.start();
+
+    // 7. Démarrer la boucle de mise à jour des métriques
+    this._startMetricsLoop();
 
     this.active = true;
     Logger.info('[PitchAnalysisPanel] ✅ Panneau démarré avec succès');
   }
 
   /**
-   * Configurer le pipeline audio : Micro → ScriptProcessor → Pitch Detection
-   * CORRECTION : Créer TOUJOURS le scriptProcessor, même si micSource absent
+   * Démarrer la boucle de mise à jour des métriques UI
+   * Lit les données pitch depuis le renderer et met à jour l'affichage
    */
-  _setupAudioPipeline(context) {
-    // Créer ScriptProcessor pour analyser l'audio
-    // Buffer size : 2048 samples = bon compromis latence/précision
-    const bufferSize = 2048;
-    
-    try {
-      this.scriptProcessor = context.createScriptProcessor(bufferSize, 1, 1);
-      Logger.info('[PitchAnalysisPanel] ScriptProcessor créé', { bufferSize });
-    } catch (e) {
-      Logger.error('[PitchAnalysisPanel] Erreur création ScriptProcessor', e);
-      throw e;
-    }
-    
-    // Callback appelé pour chaque buffer audio
-    this.scriptProcessor.onaudioprocess = (e) => {
-      this._processAudioBuffer(e);
-    };
-    
-    Logger.info('[PitchAnalysisPanel] Callback onaudioprocess défini');
+  _startMetricsLoop() {
+    const updateMetrics = () => {
+      if (!this.active || !this.renderer) return;
 
-    // Connecter seulement si micSource existe
-    const micSource = audioEngine.micSource;
-    
-    if (micSource) {
-      try {
-        micSource.connect(this.scriptProcessor);
-        this.scriptProcessor.connect(context.destination);
-        Logger.info('[PitchAnalysisPanel] Pipeline audio connecté (Micro → ScriptProcessor → Destination)');
-      } catch (e) {
-        Logger.error('[PitchAnalysisPanel] Erreur connexion pipeline', e);
-        throw e;
+      // Lire l'historique du renderer (derniers points détectés)
+      const history = this.renderer.pitchHistory;
+      
+      if (history && history.length > 0) {
+        // Prendre le dernier point
+        const lastPoint = history[history.length - 1];
+        
+        if (lastPoint && lastPoint.frequency) {
+          // Calculer note et cents depuis la fréquence
+          const noteData = this._frequencyToNoteData(lastPoint.frequency);
+          
+          this.lastMetrics = {
+            frequency: Math.round(lastPoint.frequency * 10) / 10,
+            note: noteData.note,
+            cents: noteData.cents
+          };
+          
+          this._updateMetrics();
+        }
       }
-    } else {
-      // MicSource pas encore disponible - connecter quand même à destination
-      // pour que le scriptProcessor soit actif
-      Logger.warn('[PitchAnalysisPanel] MicSource absent, connexion à destination uniquement');
-      try {
-        this.scriptProcessor.connect(context.destination);
-        Logger.info('[PitchAnalysisPanel] ScriptProcessor connecté à destination');
-      } catch (e) {
-        Logger.error('[PitchAnalysisPanel] Erreur connexion destination', e);
-      }
-    }
+
+      // Continuer la boucle
+      this.metricsLoopId = requestAnimationFrame(updateMetrics);
+    };
+
+    this.metricsLoopId = requestAnimationFrame(updateMetrics);
+    Logger.info('[PitchAnalysisPanel] Boucle métriques démarrée');
   }
 
   /**
-   * Traiter chaque buffer audio : détection + lissage + visualisation
+   * Convertir fréquence en note + cents (helper local)
    */
-  _processAudioBuffer(event) {
-    if (!this.active) return;
-
-    // Récupérer les données audio (mono)
-    const inputBuffer = event.inputBuffer;
-    const audioData = inputBuffer.getChannelData(0);
-
-    // Copier dans un Float32Array (YIN a besoin d'un buffer propre)
-    const buffer = new Float32Array(audioData);
-
+  _frequencyToNoteData(frequency) {
     try {
-      // 1. Détecter pitch avec YIN
-      const pitchData = this.pitchDetector.detect(buffer);
-
-      // 2. Lisser la fréquence
-      const frequency = pitchData ? pitchData.frequency : null;
-      const smoothedFreq = this.pitchSmoother.smooth(frequency);
-
-      // 3. Envoyer au renderer
-      if (smoothedFreq !== null) {
-        this.renderer.addPitchPoint(smoothedFreq);
-        
-        // Mettre à jour les métriques
-        this.lastMetrics = {
-          frequency: Math.round(smoothedFreq * 10) / 10,
-          note: pitchData.note,
-          cents: pitchData.cents
-        };
-        
-        // Émettre événement pour mettre à jour l'UI (métriques)
-        this._updateMetrics();
-        
-        Logger.debug('[PitchAnalysisPanel] Pitch détecté', {
-          frequency: this.lastMetrics.frequency,
-          note: this.lastMetrics.note,
-          cents: this.lastMetrics.cents
-        });
-      }
-
+      // Utiliser CentsCalculator si disponible
+      const { CentsCalculator } = await import('../../audio/analysis/CentsCalculator.js');
+      return CentsCalculator.frequencyToNote(frequency);
     } catch (e) {
-      Logger.error('[PitchAnalysisPanel] Erreur traitement buffer', e);
+      // Fallback simple si import échoue
+      Logger.warn('[PitchAnalysisPanel] CentsCalculator non disponible, calcul simplifié');
+      return {
+        note: '—',
+        cents: 0
+      };
     }
   }
 
@@ -243,6 +230,13 @@ export class PitchAnalysisPanel {
     
     Logger.info('[PitchAnalysisPanel] Arrêt...');
 
+    // Arrêter la boucle métriques
+    if (this.metricsLoopId) {
+      cancelAnimationFrame(this.metricsLoopId);
+      this.metricsLoopId = null;
+      Logger.info('[PitchAnalysisPanel] Boucle métriques arrêtée');
+    }
+
     // Arrêter le renderer
     try { 
       this.renderer?.stop(); 
@@ -251,16 +245,15 @@ export class PitchAnalysisPanel {
       Logger.error('[PitchAnalysisPanel] Erreur arrêt renderer', e);
     }
 
-    // Déconnecter le ScriptProcessor
+    // Déconnecter l'AnalyserNode
     try {
-      if (this.scriptProcessor) {
-        this.scriptProcessor.disconnect();
-        this.scriptProcessor.onaudioprocess = null;
-        this.scriptProcessor = null;
+      if (this.analyser) {
+        this.analyser.disconnect();
+        this.analyser = null;
       }
-      Logger.info('[PitchAnalysisPanel] ScriptProcessor déconnecté');
+      Logger.info('[PitchAnalysisPanel] AnalyserNode déconnecté');
     } catch (e) {
-      Logger.error('[PitchAnalysisPanel] Erreur déconnexion ScriptProcessor', e);
+      Logger.error('[PitchAnalysisPanel] Erreur déconnexion AnalyserNode', e);
     }
 
     // Reset smoothers
@@ -299,6 +292,12 @@ export class PitchAnalysisPanel {
     if (this.renderer) {
       Logger.info('[PitchAnalysisPanel] Gel du tracé');
       this.renderer.stop();
+      
+      // Arrêter aussi la boucle métriques
+      if (this.metricsLoopId) {
+        cancelAnimationFrame(this.metricsLoopId);
+        this.metricsLoopId = null;
+      }
     }
   }
 

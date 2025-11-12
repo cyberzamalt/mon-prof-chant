@@ -20,6 +20,31 @@ export class RecordingService {
     return !!this.#last.live; 
   }
 
+  /**
+   * AJOUT : Démarrer l'enregistrement (version simple)
+   * Récupère automatiquement la source micro depuis audioEngine
+   */
+  async start() {
+    if (this.#recording) {
+      Logger.warn('[RecordingService] Déjà en cours d\'enregistrement');
+      return true;
+    }
+
+    // Récupérer la source micro depuis audioEngine
+    const sourceNode = audioEngine.micSource;
+    
+    if (!sourceNode) {
+      const err = new Error('Pas de source micro disponible - démarrer le micro d\'abord');
+      Logger.error('[RecordingService]', err);
+      throw err;
+    }
+
+    Logger.info('[RecordingService] Démarrage enregistrement via start()...');
+    
+    // Déléguer à startFromSource()
+    return this.startFromSource(sourceNode);
+  }
+
   startFromSource(sourceNode) {
     if (this.#recording) {
       Logger.warn('[RecordingService] Déjà en cours d\'enregistrement');
@@ -32,7 +57,7 @@ export class RecordingService {
       throw err;
     }
 
-    // CORRECTION : Utiliser audioEngine.context au lieu de audioEngine.ready()
+    // Utiliser audioEngine.context au lieu de audioEngine.ready()
     const context = audioEngine.context;
     if (!context) {
       const err = new Error('AudioEngine non initialisé - appelez audioEngine.init() d\'abord');
@@ -73,6 +98,15 @@ export class RecordingService {
     return true;
   }
 
+  /**
+   * AJOUT : Arrêter l'enregistrement (version simple)
+   * Alias pour stopAndEncode() avec kind='live'
+   */
+  async stop() {
+    Logger.info('[RecordingService] Arrêt via stop()...');
+    return this.stopAndEncode('live');
+  }
+
   async stopAndEncode(kind='live') {
     if (!this.#recording) {
       Logger.warn('[RecordingService] Pas d\'enregistrement en cours');
@@ -86,7 +120,7 @@ export class RecordingService {
       chunksR: this.#collectR.length
     });
 
-    // CORRECTION : Utiliser audioEngine.context au lieu de audioEngine.ready()
+    // Utiliser audioEngine.context au lieu de audioEngine.ready()
     const context = audioEngine.context;
     if (!context) {
       const err = new Error('AudioEngine non initialisé');

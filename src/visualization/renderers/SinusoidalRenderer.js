@@ -1,7 +1,5 @@
 // src/visualization/renderers/SinusoidalRenderer.js
-// Rendu de la courbe sinusoïdale de PITCH
-// ATTENTION : Affiche PITCH (Hz), pas waveform audio brute
-
+// Rendu de la courbe sinusoïdale de PITCH avec AnalyserNode
 import { Logger } from '../../logging/Logger.js';
 import { CentsCalculator } from '../../audio/analysis/CentsCalculator.js';
 
@@ -17,12 +15,16 @@ export class SinusoidalRenderer {
     this.ctx = canvas.getContext('2d');
     this.pitchDetector = null;
     this.pitchSmoother = null;
+    this.analyser = null; // AnalyserNode (sera fourni par PitchAnalysisPanel)
     this.running = false;
     this.persistent = !!opts.persistent; // Mode scrolling
     
     // Historique des points de pitch
     this.pitchHistory = []; // { frequency, timestamp, y }
     this.maxHistoryPoints = 2000; // ~33 secondes à 60 FPS
+    
+    // Buffer pour lecture audio depuis AnalyserNode
+    this.audioBuffer = null;
     
     // Timing
     this._timeLastTick = 0;
@@ -63,12 +65,27 @@ export class SinusoidalRenderer {
   }
 
   /**
-   * Attacher le pitch detector et le smoother
+   * Attacher le pitch detector, le smoother ET l'analyser
    */
   attachPitchDetector(pitchDetector, pitchSmoother) {
     this.pitchDetector = pitchDetector;
     this.pitchSmoother = pitchSmoother;
-    Logger.info('[SinusoidalRenderer] PitchDetector attaché');
+    Logger.info('[SinusoidalRenderer] PitchDetector et PitchSmoother attachés');
+  }
+
+  /**
+   * Attacher l'AnalyserNode pour lire l'audio
+   */
+  attachAnalyser(analyser) {
+    this.analyser = analyser;
+    
+    // Créer buffer pour lecture audio
+    this.audioBuffer = new Float32Array(analyser.fftSize);
+    
+    Logger.info('[SinusoidalRenderer] AnalyserNode attaché', {
+      fftSize: analyser.fftSize,
+      bufferSize: this.audioBuffer.length
+    });
   }
 
   start() {
@@ -109,13 +126,36 @@ export class SinusoidalRenderer {
     const W = canvas.width;
     const H = canvas.height;
 
-    if (!this.pitchDetector) {
-      // Clignote si pas de pitch detector
+    // Vérifier que tout est prêt
+    if (!this.analyser || !this.pitchDetector || !this.pitchSmoother) {
+      // Clignote si pas prêt
       if (now - this._timeLastTick > 500) { 
         this._drawBackdrop(); 
         this._timeLastTick = now; 
       }
       return;
+    }
+
+    // ÉTAPE 1 : Lire les données audio depuis AnalyserNode
+    this.analyser.getFloatTimeDomainData(this.audioBuffer);
+
+    // ÉTAPE 2 : Détecter pitch avec YIN
+    let pitchData = null;
+    let smoothedFreq = null;
+    
+    try {
+      pitchData = this.pitchDetector.detect(this.audioBuffer);
+      const frequency = pitchData ? pitchData.frequency : null;
+      smoothedFreq = this.pitchSmoother.smooth(frequency);
+      
+      Logger.debug('[SinusoidalRenderer] Pitch détecté', {
+        raw: frequency,
+        smoothed: smoothedFreq,
+        note: pitchData?.note
+      });
+      
+    } catch (e) {
+      Logger.error('[SinusoidalRenderer] Erreur détection pitch', e);
     }
 
     // Mode scrolling
@@ -138,8 +178,10 @@ export class SinusoidalRenderer {
       // Redessiner axes et labels FIXES
       this._drawFixedElements();
       
-      // Dessiner nouveau point de pitch
-      this._drawLatestPitchPoint(W, H);
+      // ÉTAPE 3 : Dessiner le point de pitch (si détecté)
+      if (smoothedFreq !== null) {
+        this._drawPitchPointAtEdge(smoothedFreq, H);
+      }
       
     } else {
       // Mode non-persistent : redessiner tout
@@ -158,8 +200,12 @@ export class SinusoidalRenderer {
     
     // Ligne centrale horizontale (440 Hz)
     const centerY = this._frequencyToY(this.centerFreq, H);
-    ctx.fillStyle = this._axis;
-    ctx.fillRect(0, centerY, 8, 2); // Petit trait à gauche
+    ctx.strokeStyle = this._axis;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, centerY);
+    ctx.lineTo(canvas.width, centerY);
+    ctx.stroke();
     
     // Labels registres vocaux (FIXES à gauche)
     ctx.fillStyle = '#9fb7ff';
@@ -172,34 +218,13 @@ export class SinusoidalRenderer {
   }
 
   /**
-   * Dessiner le dernier point de pitch détecté
+   * Dessiner un point de pitch sur le bord droit du canvas
+   * @param {number} frequency - Fréquence en Hz
+   * @param {number} H - Hauteur du canvas
    */
-  _drawLatestPitchPoint(W, H) {
-    if (!this.pitchDetector || !this.pitchSmoother) return;
-    
-    // Note: On suppose qu'on reçoit les données pitch via un callback
-    // ou qu'on les récupère d'un buffer partagé
-    // Pour l'instant, on va simuler en attendant l'intégration
-    
-    // TODO: Intégrer avec le pipeline audio
-    // const pitchData = this.pitchDetector.detect(buffer);
-    // const smoothedFreq = this.pitchSmoother.smooth(pitchData?.frequency);
-    
-    // Placeholder: on va recevoir les données via une méthode addPitchPoint()
-  }
-
-  /**
-   * Ajouter un point de pitch à l'historique
-   * Appelé par PitchAnalysisPanel quand un pitch est détecté
-   * @param {number|null} frequency - Fréquence en Hz (ou null)
-   */
-  addPitchPoint(frequency) {
-    const H = this.canvas.height;
-    
-    if (frequency === null || frequency === undefined || frequency <= 0) {
-      // Pas de pitch détecté, ne rien ajouter
-      return;
-    }
+  _drawPitchPointAtEdge(frequency, H) {
+    const {ctx, canvas} = this;
+    const W = canvas.width;
     
     // Filtrer fréquences hors plage
     if (frequency < this.minFreq || frequency > this.maxFreq) {
@@ -210,7 +235,15 @@ export class SinusoidalRenderer {
     // Convertir Hz → position Y
     const y = this._frequencyToY(frequency, H);
     
-    // Ajouter à l'historique
+    // Couleur (vert par défaut, on peut ajouter logique cents plus tard)
+    const color = this._wave;
+    
+    // Dessiner petit segment vertical (2-3 pixels de large)
+    ctx.fillStyle = color;
+    const x = W - Math.ceil(this._scrollSpeed / 2);
+    ctx.fillRect(x, y - 1, 2, 3);
+    
+    // Ajouter à l'historique pour mode non-persistent
     this.pitchHistory.push({
       frequency: frequency,
       timestamp: performance.now(),
@@ -221,26 +254,6 @@ export class SinusoidalRenderer {
     if (this.pitchHistory.length > this.maxHistoryPoints) {
       this.pitchHistory.shift();
     }
-    
-    // Dessiner le point sur la colonne droite
-    this._drawPitchPointAtEdge(y);
-  }
-
-  /**
-   * Dessiner un point de pitch sur le bord droit du canvas
-   */
-  _drawPitchPointAtEdge(y) {
-    const {ctx, canvas} = this;
-    const W = canvas.width;
-    
-    // Obtenir couleur selon proximité de la note cible
-    // Pour l'instant, vert par défaut
-    const color = this._wave;
-    
-    // Dessiner petit segment vertical (2-3 pixels de large)
-    ctx.fillStyle = color;
-    const x = W - Math.ceil(this._scrollSpeed / 2);
-    ctx.fillRect(x, y - 1, 2, 3);
   }
 
   /**
@@ -304,18 +317,11 @@ export class SinusoidalRenderer {
     ctx.fillStyle = this._bg; 
     ctx.fillRect(0, 0, W, H);
 
-    // Grille
+    // Lignes horizontales (registres vocaux)
     ctx.strokeStyle = this._grid; 
     ctx.lineWidth = 1;
     ctx.beginPath();
     
-    // Lignes verticales (tous les ~50px)
-    for (let x = 0; x <= W; x += Math.round(W / 12)) { 
-      ctx.moveTo(x, 0); 
-      ctx.lineTo(x, H); 
-    }
-    
-    // Lignes horizontales (registres vocaux)
     for (const label of this.vocalLabels) {
       const y = this._frequencyToY(label.freq, H);
       ctx.moveTo(0, y);
@@ -326,8 +332,12 @@ export class SinusoidalRenderer {
 
     // Ligne centrale horizontale (440 Hz) plus visible
     const centerY = this._frequencyToY(this.centerFreq, H);
-    ctx.fillStyle = this._axis; 
-    ctx.fillRect(0, centerY, W, 2);
+    ctx.strokeStyle = this._axis;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, centerY);
+    ctx.lineTo(W, centerY);
+    ctx.stroke();
     
     // Labels registres vocaux (FIXES à gauche)
     ctx.fillStyle = '#9fb7ff'; 
@@ -336,11 +346,6 @@ export class SinusoidalRenderer {
     for (const label of this.vocalLabels) {
       const y = this._frequencyToY(label.freq, H);
       ctx.fillText(label.label, 4, y + 4);
-      
-      // Petit trait à gauche
-      ctx.fillStyle = this._grid;
-      ctx.fillRect(0, y, 3, 1);
-      ctx.fillStyle = '#9fb7ff';
     }
 
     // Axe temps (X) en bas

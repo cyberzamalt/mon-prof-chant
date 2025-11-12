@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Mon Professeur de Chant – v2 clean</title>
+  <title>Mon Professeur de Chant – v2 Pitch Detection</title>
   <style>
     :root{
       --bg:#0c1420; --panel:#111a28; --grid:#1a2642; --text:#e5e7eb;
@@ -13,8 +13,8 @@
     *{box-sizing:border-box} html,body{height:100%}
     body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Arial,sans-serif}
     .wrap{max-width:1100px;margin:32px auto;padding:0 16px}
-    .topbar{display:flex;gap:8px;align-items:center;margin-bottom:12px}
-    .btn{border:1px solid var(--border);background:#152036;color:var(--text);padding:8px 12px;border-radius:8px;cursor:pointer}
+    .topbar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+    .btn{border:1px solid var(--border);background:#152036;color:var(--text);padding:8px 12px;border-radius:8px;cursor:pointer;font-size:14px}
     .btn:disabled{opacity:.5;cursor:not-allowed}
     .btn.ok{background:var(--accent);color:#04110a;border-color:#0b3}
     .btn.danger{background:#b91c1c;border-color:#7f1d1d}
@@ -26,120 +26,225 @@
     canvas{width:100%;height:320px;background:#0a1224;border:1px solid var(--border);border-radius:8px;display:block}
     .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
     .metric{background:#0e1a33;border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center}
-    .metric b{display:block;font-size:18px}
+    .metric span{display:block;font-size:11px;color:var(--muted);margin-bottom:4px}
+    .metric b{display:block;font-size:18px;color:var(--text)}
     .toolbar{display:flex;justify-content:space-between;align-items:center;margin:6px 0 10px 0}
     .hidden{display:none!important}
-    .note{color:var(--muted);font-size:12px}
+    .note{color:var(--muted);font-size:12px;margin-top:8px}
+    .info{background:#1e3a5f;border:1px solid #2563eb;color:#93c5fd;padding:12px;border-radius:8px;margin-bottom:16px;font-size:13px}
+    .info strong{color:#60a5fa}
   </style>
 </head>
 <body>
   <div class="wrap">
+    <div class="info">
+      <strong>🎤 Mon Professeur de Chant v2</strong><br>
+      Détection pitch temps réel avec algorithme YIN + visualisation sinusoïdale
+    </div>
+
     <div class="topbar">
       <button id="btnStart" class="btn ok">▶️ Démarrer</button>
       <button id="btnStop" class="btn danger" disabled>⏹️ Arrêter</button>
       <button id="btnRec" class="btn secondary" disabled>⏺️ Enregistrer</button>
       <button id="btnClear" class="btn">🗑️ Effacer</button>
-      <span id="appStatus" class="status">Prêt.</span>
+      <span id="appStatus" class="status">Prêt. Cliquez "Démarrer" pour activer le micro.</span>
     </div>
 
     <div class="row">
       <div class="card">
         <div class="toolbar">
-          <h3>Enregistrement Live</h3>
+          <h3>🎵 Enregistrement Live</h3>
           <a id="dlLive" class="btn secondary hidden" download="live.mp3">💾 Télécharger MP3</a>
         </div>
         <canvas id="canvas-recording" width="520" height="320"></canvas>
         <div class="metrics">
-          <div class="metric"><span>FRÉQUENCE</span><b id="mFreq">—</b></div>
-          <div class="metric"><span>NOTE</span><b id="mNote">—</b></div>
-          <div class="metric"><span>CENTS</span><b id="mCents">—</b></div>
+          <div class="metric">
+            <span>FRÉQUENCE</span>
+            <b id="mFreq">—</b>
+          </div>
+          <div class="metric">
+            <span>NOTE</span>
+            <b id="mNote">—</b>
+          </div>
+          <div class="metric">
+            <span>CENTS</span>
+            <b id="mCents">—</b>
+          </div>
         </div>
+        <p class="note">
+          Chantez ou jouez une note - la courbe monte/descend selon la hauteur.
+          La ligne centrale = La (440 Hz).
+        </p>
       </div>
 
       <div class="card">
         <div class="toolbar">
-          <h3>Référence Audio</h3>
+          <h3>📊 Référence Audio</h3>
           <a id="dlRef" class="btn secondary hidden" download="reference.mp3">💾 Télécharger MP3</a>
         </div>
         <canvas id="canvas-reference" width="520" height="320"></canvas>
-        <p class="note">À venir : chargement d’un MP3/Youtube pour comparer visuellement.</p>
+        <p class="note">
+          <strong>À venir :</strong> Import MP3/YouTube pour comparaison visuelle avec votre performance.
+        </p>
       </div>
     </div>
   </div>
 
-  <!-- Librairies “non modules” -->
+  <!-- Librairies "non modules" - chargées via <script> -->
   <script src="src/vendor/yin-detector.js"></script>
-  <script src="src/utils/pitch-smoothing.js"></script>
   <script src="src/vendor/lame.min.js"></script>
 
-  <!-- App (modules) -->
+  <!-- App (modules ES6) -->
   <script type="module">
     import app from './src/app.js';
 
+    // Helpers DOM
     const $ = (id) => document.getElementById(id);
-    const btnStart = $('btnStart'), btnStop = $('btnStop'), btnRec = $('btnRec'), btnClear = $('btnClear');
+    
+    // Éléments UI
+    const btnStart = $('btnStart');
+    const btnStop = $('btnStop');
+    const btnRec = $('btnRec');
+    const btnClear = $('btnClear');
     const status = $('appStatus');
     const dlLive = $('dlLive');
     const liveCanvas = $('canvas-recording');
-    const refCanvas  = $('canvas-reference');
+    const refCanvas = $('canvas-reference');
 
-    // Handlers visibles globalement – pas de jQuery, pas de .ready()
+    // État local
+    let recording = false;
+
+    // Handler : Démarrer (micro + visualisation)
     btnStart.onclick = async () => {
       try {
-        status.textContent = 'Démarrage...';
-        await app.start();                 // init context + micro
-        app.getPanel('recording')?.start(liveCanvas);
-        app.getPanel('reference')?.start(refCanvas);
-        btnStart.disabled = true; btnStop.disabled = false; btnRec.disabled = false;
-        status.textContent = 'Micro actif.';
+        status.textContent = '⏳ Démarrage du micro...';
+        btnStart.disabled = true;
+
+        // 1. Démarrer l'app (init AudioContext + micro)
+        await app.start();
+
+        // 2. Démarrer les panneaux de visualisation
+        const panelLive = app.getPanel('recording');
+        const panelRef = app.getPanel('reference');
+
+        if (panelLive) {
+          panelLive.start(liveCanvas);
+        }
+
+        if (panelRef) {
+          panelRef.start(refCanvas);
+        }
+
+        // 3. Mettre à jour UI
+        btnStop.disabled = false;
+        btnRec.disabled = false;
+        status.textContent = '✅ Micro actif - Visualisation en cours';
+
       } catch (e) {
-        console.error(e);
-        status.textContent = 'Erreur de démarrage.';
+        console.error('[UI] Erreur démarrage', e);
+        status.textContent = '❌ Erreur de démarrage';
         alert('Erreur: ' + (e?.message || e));
+        btnStart.disabled = false;
       }
     };
 
+    // Handler : Arrêter (stop micro + visualisation)
     btnStop.onclick = () => {
       try {
         app.stop();
-        btnStart.disabled = false; btnStop.disabled = true; btnRec.disabled = true;
-        status.textContent = 'Arrêté.';
+        
+        btnStart.disabled = false;
+        btnStop.disabled = true;
+        btnRec.disabled = true;
+        
+        status.textContent = '⏸️ Arrêté';
+        
       } catch (e) {
-        console.error(e);
+        console.error('[UI] Erreur arrêt', e);
         alert('Erreur: ' + (e?.message || e));
       }
     };
 
+    // Handler : Enregistrer (toggle)
     btnRec.onclick = async () => {
       try {
-        if (app.getService('recording')?.isRecording()) {
-          const data = await app.getService('recording').stop();
-          status.textContent = `Enregistrement arrêté (${(data?.duration/1000).toFixed(2)}s)`;
-          if (data?.mp3Blob) {
+        const recService = app.getService('recording');
+        
+        if (!recService) {
+          throw new Error('Service d\'enregistrement non disponible');
+        }
+
+        if (recService.isRecording()) {
+          // Arrêter l'enregistrement
+          status.textContent = '⏳ Encodage MP3...';
+          btnRec.disabled = true;
+
+          const data = await recService.stop();
+          
+          if (data && data.mp3Blob) {
+            // Afficher bouton de téléchargement
             dlLive.classList.remove('hidden');
             dlLive.href = URL.createObjectURL(data.mp3Blob);
+            dlLive.download = data.name || 'enregistrement.mp3';
+            
+            status.textContent = `✅ Enregistrement terminé (${(data.duration/1000).toFixed(1)}s)`;
+          } else {
+            status.textContent = '✅ Enregistrement terminé';
           }
+
           btnRec.textContent = '⏺️ Enregistrer';
+          btnRec.disabled = false;
+          recording = false;
+
         } else {
-          await app.getService('recording').start();
-          status.textContent = 'Enregistrement en cours...';
+          // Démarrer l'enregistrement
+          await recService.start();
+          
+          status.textContent = '🔴 Enregistrement en cours...';
           btnRec.textContent = '⏹️ Arrêter Enreg.';
+          recording = true;
         }
+
       } catch (e) {
-        console.error(e);
+        console.error('[UI] Erreur enregistrement', e);
         alert('Erreur: ' + (e?.message || e));
+        btnRec.disabled = false;
       }
     };
 
+    // Handler : Effacer
     btnClear.onclick = () => {
-      app.getPanel('recording')?.clear();
-      app.getPanel('reference')?.clear();
-      status.textContent = 'Effacé.';
+      try {
+        const panelLive = app.getPanel('recording');
+        const panelRef = app.getPanel('reference');
+        
+        if (panelLive) panelLive.clear();
+        if (panelRef) panelRef.clear();
+        
+        // Reset métriques
+        $('mFreq').textContent = '—';
+        $('mNote').textContent = '—';
+        $('mCents').textContent = '—';
+        $('mCents').style.color = '';
+        
+        // Cacher bouton download
+        dlLive.classList.add('hidden');
+        
+        status.textContent = '🗑️ Canvas effacé';
+        
+      } catch (e) {
+        console.error('[UI] Erreur effacement', e);
+      }
     };
 
-    // Au chargement du DOM, on initialise l’app (sans lancer le micro)
+    // Initialiser l'app au chargement du DOM
     document.addEventListener('DOMContentLoaded', async () => {
-      try { await app.init(); } catch(e){ console.error(e); }
+      try {
+        await app.init();
+        console.log('[UI] Application initialisée');
+      } catch (e) {
+        console.error('[UI] Erreur initialisation', e);
+      }
     });
   </script>
 </body>

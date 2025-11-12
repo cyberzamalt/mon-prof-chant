@@ -62,7 +62,7 @@ export class PitchAnalysisPanel {
         threshold: 0.1,
         minFreq: 80,
         maxFreq: 1400,
-        clarityThreshold: 0.85
+        clarityThreshold: 0.5
       });
       Logger.info('[PitchAnalysisPanel] PitchDetector créé');
     } catch (e) {

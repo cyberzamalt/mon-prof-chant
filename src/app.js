@@ -9,7 +9,7 @@ class App {
   #mic; #rec; #panelLive; #panelRef; #started=false;
 
   constructor(){
-    Logger.setLevel('INFO');
+    Logger.setLevel('DEBUG');
     Logger.info('[App] 🚀 Initialisation de l\'application...');
     
     // Panneaux (le canvas sera passé plus tard via start())

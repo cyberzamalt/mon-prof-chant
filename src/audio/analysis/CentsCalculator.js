@@ -1,250 +1,239 @@
-/**
- * CentsCalculator.js
- * Calculateur de déviations en cents
- * 
- * Responsabilités:
- * - Calculer la déviation en cents par rapport à une note
- * - Identifier la note la plus proche
- * - Convertir fréquences en notes musicales
- * 
- * 1 cent = 1/100 de demi-ton
- * Formule: cents = 1200 × log2(f1/f2)
- */
+// src/audio/analysis/CentsCalculator.js
+// Calculs de conversion fréquence → cents → notes
+// Formule : 1200 × log₂(freq / freq_ref)
 
 import { Logger } from '../../logging/Logger.js';
-import { NOTE_FREQUENCIES } from '../../utils/NoteFrequencies.js';
+
+/**
+ * Table des fréquences des notes (A0 = 27.5 Hz à C8 = 4186 Hz)
+ * Index 0 = A0, Index 48 = A4 (440 Hz), Index 87 = C8
+ */
+const NOTE_FREQUENCIES = [];
+const NOTE_NAMES = ['A', 'A#', 'B', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#'];
+
+// Générer table de fréquences (A0 à C8, 88 notes)
+for (let i = 0; i < 88; i++) {
+  const freq = 27.5 * Math.pow(2, i / 12); // A0 = 27.5 Hz
+  NOTE_FREQUENCIES.push(freq);
+}
 
 export class CentsCalculator {
-  #referenceA4 = 440; // Hz
-  #noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-
   /**
-   * Constructeur
-   * @param {number} referenceA4 - Fréquence de référence pour A4 (défaut 440Hz)
+   * Convertir Hz en cents par rapport à une fréquence de référence
+   * @param {number} frequency - Fréquence mesurée en Hz
+   * @param {number} referenceFreq - Fréquence de référence en Hz (défaut 440 Hz = A4)
+   * @returns {number} Déviation en cents (-∞ à +∞)
    */
-  constructor(referenceA4 = 440) {
-    try {
-      if (typeof referenceA4 !== 'number' || referenceA4 <= 0) {
-        throw new Error('Fréquence A4 invalide');
-      }
-
-      this.#referenceA4 = referenceA4;
-      Logger.info('CentsCalculator', `Initialisé avec A4=${referenceA4}Hz`);
-    } catch (err) {
-      Logger.error('CentsCalculator', 'Erreur constructeur', err);
-      throw err;
+  static frequencyToCents(frequency, referenceFreq = 440) {
+    if (!frequency || frequency <= 0) {
+      Logger.warn('[CentsCalculator] Fréquence invalide', { frequency });
+      return 0;
     }
-  }
-
-  /**
-   * Calculer la déviation en cents et identifier la note
-   * @param {number} frequency - Fréquence à analyser (Hz)
-   * @returns {Object} { note, octave, cents, deviation, targetFrequency }
-   */
-  calculate(frequency) {
-    try {
-      if (typeof frequency !== 'number' || frequency <= 0) {
-        Logger.warn('CentsCalculator', 'Fréquence invalide', frequency);
-        return {
-          note: null,
-          octave: null,
-          cents: 0,
-          deviation: 0,
-          targetFrequency: 0,
-          error: 'Fréquence invalide'
-        };
-      }
-
-      // Étape 1: Trouver la note la plus proche
-      const closestNote = this.#findClosestNote(frequency);
-
-      // Étape 2: Calculer déviation en cents
-      const cents = this.#calculateCents(frequency, closestNote.frequency);
-
-      // Étape 3: Construire le résultat
-      return {
-        note: closestNote.name,
-        octave: closestNote.octave,
-        cents: Math.round(cents),
-        deviation: cents, // Valeur exacte (non arrondie)
-        targetFrequency: closestNote.frequency,
-        frequency: frequency,
-        isFlat: cents < 0,
-        isSharp: cents > 0,
-        isInTune: Math.abs(cents) < 10 // Tolérance ±10 cents
-      };
-
-    } catch (err) {
-      Logger.error('CentsCalculator', 'Erreur calculate', err);
-      return {
-        note: null,
-        octave: null,
-        cents: 0,
-        deviation: 0,
-        targetFrequency: 0,
-        error: err.message
-      };
+    
+    if (!referenceFreq || referenceFreq <= 0) {
+      Logger.warn('[CentsCalculator] Fréquence référence invalide', { referenceFreq });
+      return 0;
     }
+
+    // Formule : 1200 × log₂(f / f_ref)
+    const cents = 1200 * Math.log2(frequency / referenceFreq);
+    
+    return cents;
   }
 
   /**
    * Trouver la note la plus proche d'une fréquence
-   * @private
    * @param {number} frequency - Fréquence en Hz
-   * @returns {Object} { name, octave, frequency }
+   * @returns {Object} { note: 'A4', octave: 4, cents: -8, frequency: 440, midiNote: 69 }
    */
-  #findClosestNote(frequency) {
-    try {
-      // Calcul du numéro de demi-ton par rapport à A4
-      const semitonesFromA4 = 12 * Math.log2(frequency / this.#referenceA4);
-      const closestSemitone = Math.round(semitonesFromA4);
-
-      // Calcul de la fréquence de la note la plus proche
-      const closestFrequency = this.#referenceA4 * Math.pow(2, closestSemitone / 12);
-
-      // Calcul de la note et de l'octave
-      // A4 = 69 en notation MIDI (C4 = 60)
-      const midiNote = 69 + closestSemitone;
-      const octave = Math.floor(midiNote / 12) - 1;
-      const noteIndex = midiNote % 12;
-      const noteName = this.#noteNames[noteIndex];
-
+  static frequencyToNote(frequency) {
+    if (!frequency || frequency <= 0) {
       return {
-        name: noteName,
-        octave: octave,
-        frequency: closestFrequency,
-        midiNote: midiNote
+        note: '—',
+        octave: 0,
+        cents: 0,
+        frequency: 0,
+        midiNote: 0,
+        noteName: '—',
+        fullName: '—'
       };
-
-    } catch (err) {
-      Logger.error('CentsCalculator', 'Erreur findClosestNote', err);
-      throw err;
     }
+
+    // Trouver l'index de la note la plus proche
+    let closestIndex = 0;
+    let minDiff = Math.abs(Math.log2(frequency / NOTE_FREQUENCIES[0]));
+
+    for (let i = 1; i < NOTE_FREQUENCIES.length; i++) {
+      const diff = Math.abs(Math.log2(frequency / NOTE_FREQUENCIES[i]));
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIndex = i;
+      }
+    }
+
+    const closestFreq = NOTE_FREQUENCIES[closestIndex];
+    
+    // Calculer la déviation en cents
+    const cents = this.frequencyToCents(frequency, closestFreq);
+
+    // Calculer nom de la note (A, A#, B, C, etc.)
+    const noteIndex = closestIndex % 12;
+    const noteName = NOTE_NAMES[noteIndex];
+    
+    // Calculer l'octave (A0 = octave 0, A4 = octave 4)
+    const octave = Math.floor(closestIndex / 12);
+    
+    // Calculer le numéro MIDI (A0 = 21, A4 = 69, C8 = 108)
+    const midiNote = 21 + closestIndex;
+
+    const result = {
+      note: noteName,
+      octave: octave,
+      cents: Math.round(cents),
+      frequency: Math.round(closestFreq * 10) / 10,
+      midiNote: midiNote,
+      noteName: noteName,
+      fullName: `${noteName}${octave}`
+    };
+
+    Logger.debug('[CentsCalculator] Conversion Hz → Note', {
+      inputFreq: Math.round(frequency * 10) / 10,
+      result
+    });
+
+    return result;
   }
 
   /**
-   * Calculer déviation en cents entre deux fréquences
-   * @private
-   * @param {number} f1 - Fréquence mesurée
-   * @param {number} f2 - Fréquence cible
-   * @returns {number} Déviation en cents
+   * Obtenir la fréquence d'une note donnée
+   * @param {string} noteName - Nom de la note (ex: 'A4', 'C#5', 'B3')
+   * @returns {number} Fréquence en Hz
    */
-  #calculateCents(f1, f2) {
-    try {
-      if (f1 <= 0 || f2 <= 0) {
-        throw new Error('Fréquences doivent être > 0');
-      }
-
-      // Formule: cents = 1200 × log2(f1/f2)
-      const cents = 1200 * Math.log2(f1 / f2);
-
-      return cents;
-
-    } catch (err) {
-      Logger.error('CentsCalculator', 'Erreur calculateCents', err);
+  static noteToFrequency(noteName) {
+    if (!noteName || typeof noteName !== 'string') {
+      Logger.warn('[CentsCalculator] Note invalide', { noteName });
       return 0;
     }
-  }
 
-  /**
-   * Obtenir la fréquence d'une note spécifique
-   * @param {string} noteName - Nom de la note (ex: 'A4', 'C#5')
-   * @returns {number|null} Fréquence en Hz ou null si invalide
-   */
-  getNoteFrequency(noteName) {
-    try {
-      if (!noteName || typeof noteName !== 'string') {
-        Logger.warn('CentsCalculator', 'Nom de note invalide', noteName);
-        return null;
-      }
-
-      // Parser le nom de la note (ex: "C#4" -> note="C#", octave=4)
-      const match = noteName.match(/^([A-G]#?)(\d+)$/);
-      if (!match) {
-        Logger.warn('CentsCalculator', 'Format de note invalide', noteName);
-        return null;
-      }
-
-      const note = match[1];
-      const octave = parseInt(match[2]);
-
-      // Trouver l'index de la note
-      const noteIndex = this.#noteNames.indexOf(note);
-      if (noteIndex === -1) {
-        Logger.warn('CentsCalculator', 'Note inconnue', note);
-        return null;
-      }
-
-      // Calculer le numéro MIDI
-      // C4 = 60, donc C0 = 12
-      const midiNote = (octave + 1) * 12 + noteIndex;
-
-      // Calculer la fréquence
-      // A4 (MIDI 69) = référence
-      const semitonesFromA4 = midiNote - 69;
-      const frequency = this.#referenceA4 * Math.pow(2, semitonesFromA4 / 12);
-
-      return frequency;
-
-    } catch (err) {
-      Logger.error('CentsCalculator', 'Erreur getNoteFrequency', err);
-      return null;
+    // Parser le nom de note (ex: "A4", "C#5")
+    const match = noteName.match(/^([A-G]#?)(\d+)$/);
+    if (!match) {
+      Logger.warn('[CentsCalculator] Format note invalide', { noteName });
+      return 0;
     }
-  }
 
-  /**
-   * Définir la fréquence de référence A4
-   * @param {number} frequency - Nouvelle fréquence A4 en Hz
-   */
-  setReferenceA4(frequency) {
-    try {
-      if (typeof frequency !== 'number' || frequency <= 0) {
-        throw new Error('Fréquence A4 invalide');
-      }
+    const note = match[1]; // "A", "C#", etc.
+    const octave = parseInt(match[2], 10);
 
-      this.#referenceA4 = frequency;
-      Logger.info('CentsCalculator', `Nouvelle référence A4=${frequency}Hz`);
-    } catch (err) {
-      Logger.error('CentsCalculator', 'Erreur setReferenceA4', err);
+    // Trouver l'index dans NOTE_NAMES
+    const noteIndex = NOTE_NAMES.indexOf(note);
+    if (noteIndex === -1) {
+      Logger.warn('[CentsCalculator] Note non reconnue', { note });
+      return 0;
     }
+
+    // Calculer l'index dans NOTE_FREQUENCIES
+    const freqIndex = octave * 12 + noteIndex;
+    
+    if (freqIndex < 0 || freqIndex >= NOTE_FREQUENCIES.length) {
+      Logger.warn('[CentsCalculator] Octave hors limites', { noteName, freqIndex });
+      return 0;
+    }
+
+    return NOTE_FREQUENCIES[freqIndex];
   }
 
   /**
-   * Obtenir la fréquence de référence actuelle
-   * @returns {number} Fréquence A4 en Hz
+   * Obtenir le numéro MIDI d'une note
+   * @param {string} noteName - Nom de la note (ex: 'A4')
+   * @returns {number} Numéro MIDI (A0 = 21, A4 = 69, C8 = 108)
    */
-  getReferenceA4() {
-    return this.#referenceA4;
+  static noteToMidi(noteName) {
+    const freq = this.noteToFrequency(noteName);
+    if (!freq) return 0;
+
+    const noteData = this.frequencyToNote(freq);
+    return noteData.midiNote;
   }
 
   /**
-   * Convertir cents en ratio de fréquence
+   * Convertir numéro MIDI en fréquence
+   * @param {number} midiNote - Numéro MIDI (21-108)
+   * @returns {number} Fréquence en Hz
+   */
+  static midiToFrequency(midiNote) {
+    if (!midiNote || midiNote < 21 || midiNote > 108) {
+      Logger.warn('[CentsCalculator] MIDI note hors limites', { midiNote });
+      return 0;
+    }
+
+    const index = midiNote - 21;
+    return NOTE_FREQUENCIES[index];
+  }
+
+  /**
+   * Vérifier si une fréquence est dans une plage de cents acceptable
+   * @param {number} frequency - Fréquence mesurée
+   * @param {number} targetFrequency - Fréquence cible
+   * @param {number} tolerance - Tolérance en cents (défaut ±25)
+   * @returns {boolean} true si dans la tolérance
+   */
+  static isInTune(frequency, targetFrequency, tolerance = 25) {
+    const cents = Math.abs(this.frequencyToCents(frequency, targetFrequency));
+    return cents <= tolerance;
+  }
+
+  /**
+   * Obtenir un code couleur selon la déviation en cents
    * @param {number} cents - Déviation en cents
-   * @returns {number} Ratio (ex: 100 cents = 1.0595, soit un demi-ton)
+   * @returns {string} Code couleur hex
    */
-  centsToRatio(cents) {
-    try {
-      // Formule inverse: ratio = 2^(cents/1200)
-      return Math.pow(2, cents / 1200);
-    } catch (err) {
-      Logger.error('CentsCalculator', 'Erreur centsToRatio', err);
-      return 1;
+  static getCentsColor(cents) {
+    const absCents = Math.abs(cents);
+    
+    if (absCents <= 10) {
+      return '#10b981'; // Vert (excellent)
+    } else if (absCents <= 25) {
+      return '#f59e0b'; // Jaune (proche)
+    } else {
+      return '#ef4444'; // Rouge (décalé)
     }
   }
 
   /**
-   * Vérifier si une fréquence est "juste" (dans la tolérance)
-   * @param {number} frequency - Fréquence à vérifier
-   * @param {number} tolerance - Tolérance en cents (défaut ±10)
-   * @returns {boolean} true si juste
+   * Obtenir un label de qualité selon la déviation
+   * @param {number} cents - Déviation en cents
+   * @returns {string} Label ('Excellent', 'Bien', 'À travailler')
    */
-  isInTune(frequency, tolerance = 10) {
-    try {
-      const result = this.calculate(frequency);
-      return Math.abs(result.cents) <= tolerance;
-    } catch (err) {
-      Logger.error('CentsCalculator', 'Erreur isInTune', err);
-      return false;
+  static getCentsLabel(cents) {
+    const absCents = Math.abs(cents);
+    
+    if (absCents <= 10) {
+      return 'Excellent';
+    } else if (absCents <= 25) {
+      return 'Bien';
+    } else if (absCents <= 50) {
+      return 'À travailler';
+    } else {
+      return 'Faux';
     }
+  }
+
+  /**
+   * Obtenir la plage de registre vocal pour une fréquence
+   * @param {number} frequency - Fréquence en Hz
+   * @returns {string} Registre ('Très très grave', 'Grave', 'Moyen', 'Aigu', etc.)
+   */
+  static getVocalRegister(frequency) {
+    if (frequency < 80) return 'Très très grave';
+    if (frequency < 160) return 'Très grave';
+    if (frequency < 250) return 'Grave';
+    if (frequency < 440) return 'Moyen-grave';
+    if (frequency < 600) return 'Moyen-aigu';
+    if (frequency < 900) return 'Aigu';
+    if (frequency < 1400) return 'Très aigu';
+    return 'Très très aigu';
   }
 }
+
+export default CentsCalculator;

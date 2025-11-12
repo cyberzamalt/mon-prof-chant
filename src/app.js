@@ -1,4 +1,4 @@
-// src/app.js – orchestrateur v2
+// src/app.js – orchestrateur v2 FINAL
 import { Logger } from './logging/Logger.js';
 import { AudioEngine, audioEngine } from './audio/core/AudioEngine.js';
 import MicrophoneManager from './audio/core/MicrophoneManager.js';
@@ -23,14 +23,18 @@ class App {
     Logger.info('[App] Constructor terminé');
   }
 
-  // AJOUT : Méthode init() appelée par app.html au DOMContentLoaded
+  // Méthode init() appelée par app.html au DOMContentLoaded
   async init() {
-    Logger.info('[App] init() appelé - rien à faire pour l\'instant');
-    // Pour l'instant vide, mais existe pour que app.html ne plante pas
-    // On pourrait initialiser des choses ici si besoin futur
+    Logger.info('[App] init() appelé - préparation de l\'application');
+    
+    // Pour l'instant, on ne fait rien ici
+    // L'initialisation audio se fait dans start() après le clic utilisateur
+    // (nécessaire pour contourner les restrictions autoplay des navigateurs)
+    
+    return Promise.resolve();
   }
 
-  // AJOUT : Récupérer un panneau par son nom
+  // Récupérer un panneau par son nom
   getPanel(name) {
     if (name === 'recording') {
       Logger.info('[App] getPanel("recording") appelé');
@@ -44,11 +48,15 @@ class App {
     return null;
   }
 
-  // AJOUT : Récupérer un service par son nom
+  // Récupérer un service par son nom
   getService(name) {
     if (name === 'recording') {
       Logger.info('[App] getService("recording") appelé');
       return this.#rec;
+    }
+    if (name === 'microphone') {
+      Logger.info('[App] getService("microphone") appelé');
+      return this.#mic;
     }
     Logger.warn('[App] getService() - service inconnu:', name);
     return null;
@@ -62,21 +70,25 @@ class App {
     
     Logger.info('[App] Démarrage...');
     
-    // 1. Init contexte audio
-    await audioEngine.init();
-    
-    // 2. Démarrer le microphone
-    const { source } = await this.#mic.start();
-    
-    // 3. IMPORTANT : Enregistrer la source micro dans audioEngine
-    //    pour que PitchAnalysisPanel puisse y accéder
-    audioEngine.setMicSource(source);
-    
-    // 4. NE PAS appeler panel.start() ici - c'est app.html qui le fait
-    //    avec les références aux canvas
-    
-    this.#started = true;
-    Logger.info('[App] ✅ Application démarrée (micro actif)');
+    try {
+      // 1. Init contexte audio
+      await audioEngine.init();
+      
+      // 2. Démarrer le microphone
+      const { source } = await this.#mic.start();
+      
+      // 3. Enregistrer la source micro dans audioEngine
+      audioEngine.setMicSource(source);
+      
+      // 4. Marquer comme démarré
+      this.#started = true;
+      
+      Logger.info('[App] ✅ Application démarrée (micro actif)');
+      
+    } catch (e) {
+      Logger.error('[App] Erreur lors du démarrage', e);
+      throw e;
+    }
   }
 
   stop(){
@@ -87,24 +99,34 @@ class App {
     
     Logger.info('[App] Arrêt...');
     
-    // Arrêter les panneaux
-    this.#panelLive.stop();
-    this.#panelRef.stop();
-    
-    // Arrêter le microphone
-    this.#mic.stop();
-    
-    // Retirer la référence à la source
-    audioEngine.setMicSource(null);
-    
-    this.#started = false;
-    Logger.info('[App] ✅ Application arrêtée');
+    try {
+      // Arrêter les panneaux
+      this.#panelLive.stop();
+      this.#panelRef.stop();
+      
+      // Arrêter le microphone
+      this.#mic.stop();
+      
+      // Retirer la référence à la source
+      audioEngine.setMicSource(null);
+      
+      this.#started = false;
+      
+      Logger.info('[App] ✅ Application arrêtée');
+      
+    } catch (e) {
+      Logger.error('[App] Erreur lors de l\'arrêt', e);
+    }
   }
 
   clearPanels(){
     Logger.info('[App] Effacement des panneaux');
-    this.#panelLive.clear();
-    this.#panelRef.clear();
+    try {
+      this.#panelLive.clear();
+      this.#panelRef.clear();
+    } catch (e) {
+      Logger.error('[App] Erreur effacement panneaux', e);
+    }
   }
 
   async toggleRecord(){
@@ -116,23 +138,64 @@ class App {
     
     if(this.#rec.isRecording()){
       Logger.info('[App] Arrêt de l\'enregistrement...');
-      const file = await this.#rec.stopAndEncode('live');
-      this.#panelLive.freeze?.(); // garde le tracé (si la méthode existe)
-      Logger.info('[App] Enregistrement arrêté', file);
-      return false;
+      
+      try {
+        const file = await this.#rec.stopAndEncode('live');
+        
+        // Geler le tracé du panneau live
+        if (this.#panelLive.freeze) {
+          this.#panelLive.freeze();
+        }
+        
+        Logger.info('[App] Enregistrement arrêté', file);
+        return false; // Retourne false = pas en train d'enregistrer
+        
+      } catch (e) {
+        Logger.error('[App] Erreur arrêt enregistrement', e);
+        throw e;
+      }
+      
     } else {
       Logger.info('[App] Démarrage de l\'enregistrement...');
-      this.#rec.startFromSource(this.#mic.getSource());
-      return true;
+      
+      try {
+        this.#rec.startFromSource(this.#mic.getSource());
+        return true; // Retourne true = en train d'enregistrer
+        
+      } catch (e) {
+        Logger.error('[App] Erreur démarrage enregistrement', e);
+        throw e;
+      }
     }
   }
 
-  hasRecording(){ 
+  hasRecording() { 
     return this.#rec.hasRecording(); 
   }
 
-  async getLastMp3(kind='live'){ 
+  async getLastMp3(kind='live') { 
     return this.#rec.getLast(kind); 
+  }
+
+  /**
+   * Obtenir l'état de l'application
+   */
+  getState() {
+    return {
+      started: this.#started,
+      recording: this.#rec.isRecording(),
+      hasRecording: this.#rec.hasRecording(),
+      micActive: this.#mic.isActive(),
+      panelLiveActive: this.#panelLive.isActive(),
+      panelRefActive: this.#panelRef.isActive()
+    };
+  }
+
+  /**
+   * Vérifier si l'application est démarrée
+   */
+  isStarted() {
+    return this.#started;
   }
 }
 

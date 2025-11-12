@@ -1,327 +1,216 @@
+// src/audio/analysis/PitchDetector.js
+// Wrapper pour YIN pitch detector
+// Détection temps réel avec clarté et filtrage
+
+import { Logger } from '../../logging/Logger.js';
+import { CentsCalculator } from './CentsCalculator.js';
+import { findClosestNote } from '../../utils/NoteFrequencies.js';
+
 /**
- * PitchDetector.js - Détecteur de Hauteur (Pitch)
- * 
- * Implémentation de l'algorithme YIN pour détection de pitch
- * Analyse robuste des fréquences vocales et instrumentales
- * 
- * Fichier 8/18 - ANALYSE PITCH
- * Dépend de: Logger.js, constants.js, AudioMath.js
+ * Wrapper pour l'algorithme YIN de détection de pitch
+ * Utilise src/vendor/yin-detector.js
  */
+export class PitchDetector {
+  #yinDetector = null;
+  #sampleRate = 48000;
+  #threshold = 0.1;
+  #minFreq = 80;
+  #maxFreq = 1400;
+  #clarityThreshold = 0.85;
 
-import Logger from '../../logging/Logger.js';
-import { PITCH_DETECTION } from '../../config/constants.js';
-import { isValidHz, clampHz } from '../../utils/AudioMath.js';
+  constructor(options = {}) {
+    this.#sampleRate = options.sampleRate || 48000;
+    this.#threshold = options.threshold || 0.1;
+    this.#minFreq = options.minFreq || 80;
+    this.#maxFreq = options.maxFreq || 1400;
+    this.#clarityThreshold = options.clarityThreshold || 0.85;
 
-class PitchDetector {
-  constructor(sampleRate = PITCH_DETECTION.SAMPLE_RATE) {
-    this.sampleRate = sampleRate;
-    this.threshold = PITCH_DETECTION.YIN_THRESHOLD;
-    this.minHz = PITCH_DETECTION.MIN_HZ;
-    this.maxHz = PITCH_DETECTION.MAX_HZ;
-    
-    // Calculer les limites de lag pour YIN
-    this.minPeriod = Math.floor(this.sampleRate / this.maxHz);
-    this.maxPeriod = Math.floor(this.sampleRate / this.minHz);
-    
-    Logger.info('PitchDetector', 'Détecteur initialisé', {
-      sampleRate: this.sampleRate,
-      minHz: this.minHz,
-      maxHz: this.maxHz,
-      threshold: this.threshold
-    });
+    // Vérifier que YinDetector est disponible (chargé via <script> dans HTML)
+    if (typeof window.YinDetector === 'undefined') {
+      const err = new Error('YinDetector non disponible - vérifier que src/vendor/yin-detector.js est chargé');
+      Logger.error('[PitchDetector]', err);
+      throw err;
+    }
+
+    // Créer instance YIN
+    try {
+      this.#yinDetector = new window.YinDetector(this.#sampleRate);
+      Logger.info('[PitchDetector] Initialisé', {
+        sampleRate: this.#sampleRate,
+        threshold: this.#threshold,
+        range: `${this.#minFreq}-${this.#maxFreq} Hz`,
+        clarityThreshold: this.#clarityThreshold
+      });
+    } catch (e) {
+      Logger.error('[PitchDetector] Erreur initialisation YIN', e);
+      throw e;
+    }
   }
-  
+
   /**
-   * Détecte le pitch dans un buffer audio (Algorithme YIN)
-   * @param {Float32Array} buffer - Buffer audio
-   * @returns {number|null} Fréquence en Hz ou null si non détectée
+   * Détecter le pitch dans un buffer audio
+   * @param {Float32Array} buffer - Buffer audio (mono)
+   * @returns {Object|null} { frequency, clarity, note, cents, confidence } ou null si pas de pitch
    */
   detect(buffer) {
     if (!buffer || buffer.length === 0) {
+      Logger.warn('[PitchDetector] Buffer vide');
       return null;
     }
-    
+
+    if (!this.#yinDetector) {
+      Logger.error('[PitchDetector] YIN non initialisé');
+      return null;
+    }
+
     try {
-      // Vérifier l'énergie du signal
-      const energy = this.calculateEnergy(buffer);
-      
-      if (energy < 0.001) {
-        // Signal trop faible (silence)
+      // Appeler YIN detector
+      const result = this.#yinDetector.detect(buffer, this.#threshold);
+
+      // YIN retourne { frequency, clarity }
+      if (!result || !result.frequency || result.frequency <= 0) {
         return null;
       }
-      
-      // Calculer la fonction de différence (étape 1 de YIN)
-      const difference = this.calculateDifference(buffer);
-      
-      // Calculer la normalisation cumulative (étape 2 de YIN)
-      const cmndf = this.cumulativeMeanNormalizedDifference(difference);
-      
-      // Trouver le minimum absolu (étape 3 de YIN)
-      const tau = this.absoluteThreshold(cmndf);
-      
-      if (tau === -1) {
-        // Aucun minimum trouvé
+
+      const frequency = result.frequency;
+      const clarity = result.clarity || 0;
+
+      // Filtrer les fréquences hors plage
+      if (frequency < this.#minFreq || frequency > this.#maxFreq) {
+        Logger.debug('[PitchDetector] Fréquence hors plage', { frequency });
         return null;
       }
-      
-      // Interpolation parabolique pour affiner (étape 4 de YIN)
-      const betterTau = this.parabolicInterpolation(cmndf, tau);
-      
-      // Convertir tau en fréquence
-      const hz = this.sampleRate / betterTau;
-      
-      // Valider la fréquence
-      if (!isValidHz(hz)) {
+
+      // Filtrer les détections peu claires
+      if (clarity < this.#clarityThreshold) {
+        Logger.debug('[PitchDetector] Clarté insuffisante', { frequency, clarity });
         return null;
       }
+
+      // Enrichir avec note et cents
+      const noteData = CentsCalculator.frequencyToNote(frequency);
       
-      return clampHz(hz);
-      
-    } catch (error) {
-      Logger.error('PitchDetector', 'Erreur détection pitch', error);
+      // Calculer confiance (0-1)
+      const confidence = Math.min(clarity, 1.0);
+
+      const enrichedResult = {
+        frequency: Math.round(frequency * 10) / 10,
+        clarity: Math.round(clarity * 100) / 100,
+        note: noteData.fullName,
+        noteName: noteData.noteName,
+        octave: noteData.octave,
+        cents: noteData.cents,
+        targetFrequency: noteData.frequency,
+        midiNote: noteData.midiNote,
+        confidence: Math.round(confidence * 100) / 100,
+        timestamp: performance.now()
+      };
+
+      Logger.debug('[PitchDetector] Détection', enrichedResult);
+
+      return enrichedResult;
+
+    } catch (e) {
+      Logger.error('[PitchDetector] Erreur détection', e);
       return null;
     }
   }
-  
+
   /**
-   * Calcule l'énergie du signal (RMS)
+   * Détecter pitch avec filtre de bruit
+   * Ignore les détections trop courtes (< 100ms)
    * @param {Float32Array} buffer - Buffer audio
-   * @returns {number} Énergie RMS
+   * @returns {Object|null}
    */
-  calculateEnergy(buffer) {
-    let sum = 0;
+  detectFiltered(buffer) {
+    const result = this.detect(buffer);
     
-    for (let i = 0; i < buffer.length; i++) {
-      sum += buffer[i] * buffer[i];
+    if (!result) {
+      return null;
     }
-    
-    return Math.sqrt(sum / buffer.length);
+
+    // TODO: Ajouter logique de filtrage temporel si besoin
+    // Pour l'instant, on retourne directement
+    return result;
   }
-  
+
   /**
-   * Calcule la fonction de différence (Étape 1 YIN)
-   * @param {Float32Array} buffer - Buffer audio
-   * @returns {Float32Array} Fonction de différence
+   * Mettre à jour la plage de fréquences
+   * @param {number} minFreq - Fréquence minimale en Hz
+   * @param {number} maxFreq - Fréquence maximale en Hz
    */
-  calculateDifference(buffer) {
-    const bufferSize = buffer.length;
-    const maxLag = Math.min(this.maxPeriod, Math.floor(bufferSize / 2));
-    const difference = new Float32Array(maxLag);
-    
-    for (let tau = 0; tau < maxLag; tau++) {
-      let sum = 0;
-      
-      for (let i = 0; i < bufferSize - tau; i++) {
-        const delta = buffer[i] - buffer[i + tau];
-        sum += delta * delta;
-      }
-      
-      difference[tau] = sum;
-    }
-    
-    return difference;
+  setFrequencyRange(minFreq, maxFreq) {
+    this.#minFreq = minFreq;
+    this.#maxFreq = maxFreq;
+    Logger.info('[PitchDetector] Plage fréquences mise à jour', { minFreq, maxFreq });
   }
-  
+
   /**
-   * Calcule la normalisation cumulative (Étape 2 YIN)
-   * @param {Float32Array} difference - Fonction de différence
-   * @returns {Float32Array} CMNDF
+   * Mettre à jour le seuil de clarté
+   * @param {number} threshold - Seuil (0.0 à 1.0)
    */
-  cumulativeMeanNormalizedDifference(difference) {
-    const cmndf = new Float32Array(difference.length);
-    cmndf[0] = 1;
-    
-    let runningSum = 0;
-    
-    for (let tau = 1; tau < difference.length; tau++) {
-      runningSum += difference[tau];
-      
-      if (runningSum === 0) {
-        cmndf[tau] = 1;
-      } else {
-        cmndf[tau] = difference[tau] / (runningSum / tau);
-      }
+  setClarityThreshold(threshold) {
+    if (threshold < 0 || threshold > 1) {
+      Logger.warn('[PitchDetector] Seuil clarté invalide', { threshold });
+      return;
     }
-    
-    return cmndf;
+    this.#clarityThreshold = threshold;
+    Logger.info('[PitchDetector] Seuil clarté mis à jour', { threshold });
   }
-  
+
   /**
-   * Trouve le premier minimum sous le seuil (Étape 3 YIN)
-   * @param {Float32Array} cmndf - CMNDF
-   * @returns {number} Index tau du minimum ou -1
+   * Mettre à jour le threshold YIN
+   * @param {number} threshold - Threshold YIN (0.0 à 1.0)
    */
-  absoluteThreshold(cmndf) {
-    // Commencer à partir du minPeriod
-    const start = Math.max(this.minPeriod, 2);
-    
-    for (let tau = start; tau < cmndf.length; tau++) {
-      if (cmndf[tau] < this.threshold) {
-        // Trouver le minimum local
-        while (tau + 1 < cmndf.length && cmndf[tau + 1] < cmndf[tau]) {
-          tau++;
-        }
-        return tau;
-      }
+  setYinThreshold(threshold) {
+    if (threshold < 0 || threshold > 1) {
+      Logger.warn('[PitchDetector] Threshold YIN invalide', { threshold });
+      return;
     }
-    
-    // Si aucun minimum sous le seuil, prendre le minimum absolu
-    let minTau = start;
-    let minValue = cmndf[start];
-    
-    for (let tau = start + 1; tau < cmndf.length; tau++) {
-      if (cmndf[tau] < minValue) {
-        minValue = cmndf[tau];
-        minTau = tau;
-      }
-    }
-    
-    // Vérifier que le minimum est significatif
-    if (minValue < 1.0) {
-      return minTau;
-    }
-    
-    return -1;
+    this.#threshold = threshold;
+    Logger.info('[PitchDetector] Threshold YIN mis à jour', { threshold });
   }
-  
+
   /**
-   * Interpolation parabolique pour affiner tau (Étape 4 YIN)
-   * @param {Float32Array} cmndf - CMNDF
-   * @param {number} tau - Index approximatif
-   * @returns {number} Tau affiné
+   * Obtenir les paramètres actuels
+   * @returns {Object}
    */
-  parabolicInterpolation(cmndf, tau) {
-    if (tau === 0 || tau >= cmndf.length - 1) {
-      return tau;
-    }
-    
-    try {
-      const x0 = tau - 1;
-      const x2 = tau + 1;
-      
-      const y0 = cmndf[x0];
-      const y1 = cmndf[tau];
-      const y2 = cmndf[x2];
-      
-      // Calcul de l'interpolation parabolique
-      const a = (y0 + y2 - 2 * y1) / 2;
-      const b = (y2 - y0) / 2;
-      
-      if (a === 0) {
-        return tau;
-      }
-      
-      const betterTau = tau - b / (2 * a);
-      
-      // Vérifier que betterTau est dans une plage raisonnable
-      if (betterTau >= x0 && betterTau <= x2) {
-        return betterTau;
-      }
-      
-      return tau;
-      
-    } catch (error) {
-      Logger.warn('PitchDetector', 'Erreur interpolation', error);
-      return tau;
-    }
-  }
-  
-  /**
-   * Détecte plusieurs pitch dans un buffer (polyphonie)
-   * @param {Float32Array} buffer - Buffer audio
-   * @param {number} maxPitches - Nombre max de pitches à détecter
-   * @returns {number[]} Tableau de fréquences
-   */
-  detectMultiple(buffer, maxPitches = 3) {
-    const pitches = [];
-    const workBuffer = new Float32Array(buffer);
-    
-    try {
-      for (let i = 0; i < maxPitches; i++) {
-        const pitch = this.detect(workBuffer);
-        
-        if (!pitch) {
-          break;
-        }
-        
-        pitches.push(pitch);
-        
-        // Supprimer cette fréquence du buffer pour détecter les suivantes
-        this.removePitch(workBuffer, pitch);
-      }
-      
-    } catch (error) {
-      Logger.error('PitchDetector', 'Erreur détection multiple', error);
-    }
-    
-    return pitches;
-  }
-  
-  /**
-   * Supprime une fréquence du buffer (pour détection polyphonique)
-   * @param {Float32Array} buffer - Buffer audio
-   * @param {number} hz - Fréquence à supprimer
-   */
-  removePitch(buffer, hz) {
-    try {
-      const period = Math.round(this.sampleRate / hz);
-      
-      for (let i = 0; i < buffer.length - period; i++) {
-        buffer[i] = buffer[i] - buffer[i + period];
-      }
-      
-    } catch (error) {
-      Logger.warn('PitchDetector', 'Erreur suppression pitch', error);
-    }
-  }
-  
-  /**
-   * Définit le seuil YIN
-   * @param {number} threshold - Nouveau seuil (0-1)
-   */
-  setThreshold(threshold) {
-    if (threshold >= 0 && threshold <= 1) {
-      this.threshold = threshold;
-      Logger.info('PitchDetector', 'Seuil modifié', { threshold });
-    } else {
-      Logger.warn('PitchDetector', 'Seuil invalide', { threshold });
-    }
-  }
-  
-  /**
-   * Définit la plage de fréquences détectables
-   * @param {number} minHz - Fréquence minimale
-   * @param {number} maxHz - Fréquence maximale
-   */
-  setRange(minHz, maxHz) {
-    if (minHz > 0 && maxHz > minHz) {
-      this.minHz = minHz;
-      this.maxHz = maxHz;
-      
-      this.minPeriod = Math.floor(this.sampleRate / this.maxHz);
-      this.maxPeriod = Math.floor(this.sampleRate / this.minHz);
-      
-      Logger.info('PitchDetector', 'Plage modifiée', { minHz, maxHz });
-    } else {
-      Logger.warn('PitchDetector', 'Plage invalide', { minHz, maxHz });
-    }
-  }
-  
-  /**
-   * Récupère les paramètres actuels
-   * @returns {object} Paramètres
-   */
-  getConfig() {
+  getSettings() {
     return {
-      sampleRate: this.sampleRate,
-      threshold: this.threshold,
-      minHz: this.minHz,
-      maxHz: this.maxHz,
-      minPeriod: this.minPeriod,
-      maxPeriod: this.maxPeriod
+      sampleRate: this.#sampleRate,
+      threshold: this.#threshold,
+      minFreq: this.#minFreq,
+      maxFreq: this.#maxFreq,
+      clarityThreshold: this.#clarityThreshold
     };
+  }
+
+  /**
+   * Réinitialiser le détecteur
+   */
+  reset() {
+    try {
+      this.#yinDetector = new window.YinDetector(this.#sampleRate);
+      Logger.info('[PitchDetector] Réinitialisé');
+    } catch (e) {
+      Logger.error('[PitchDetector] Erreur réinitialisation', e);
+    }
   }
 }
 
-// Exporter la classe
+/**
+ * Factory function pour créer un PitchDetector avec config par défaut
+ * @param {number} sampleRate - Sample rate du contexte audio
+ * @returns {PitchDetector}
+ */
+export function createPitchDetector(sampleRate) {
+  return new PitchDetector({
+    sampleRate,
+    threshold: 0.1,        // Threshold YIN (0.05-0.2 = bon compromis)
+    minFreq: 80,           // Basse vocale (E2)
+    maxFreq: 1400,         // Soprano aigu (F6)
+    clarityThreshold: 0.85 // Filtrer détections peu claires
+  });
+}
+
 export default PitchDetector;
